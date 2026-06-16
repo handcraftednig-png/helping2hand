@@ -13,7 +13,14 @@ export default function ProfileScreen() {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out', style: 'destructive',
-        onPress: async () => { await signOut(); router.replace('/auth/login'); },
+        onPress: async () => {
+          const { error } = await signOut();
+          if (error) {
+            Alert.alert('Sign Out Failed', error.message);
+            return;
+          }
+          router.replace('/auth/login');
+        },
       },
     ]);
   };
@@ -37,7 +44,7 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{user?.email || 'User'}</Text>
-            <Text style={styles.profileLabel}>Helping Hand AI Student</Text>
+            <Text style={styles.profileLabel}>Helping Hand AI</Text>
           </View>
         </View>
 

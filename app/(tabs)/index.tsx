@@ -36,6 +36,7 @@ import {
 import { dark, gold } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { PrayingHandsIcon } from '@/components/PrayingHandsIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Message {
   id: string;
@@ -426,6 +427,7 @@ function ImproveBanner({
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function ChatScreen() {
+  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -437,8 +439,8 @@ export default function ChatScreen() {
   const sendGlow = useSharedValue(0);
 
   useEffect(() => {
-    loadMessages();
-  }, []);
+    if (user) loadMessages();
+  }, [user]);
 
   useEffect(() => {
     sendGlow.value = withTiming(inputText.trim() ? 1 : 0, { duration: 300 });
