@@ -1,0 +1,128 @@
+export const colors = {
+  primary: {
+    50: '#1E1A0E',
+    100: '#2E2510',
+    200: '#4A3A12',
+    300: '#6B5214',
+    400: '#9A7710',
+    500: '#C9A227',
+    600: '#D4AF37',
+    700: '#E2C05A',
+    800: '#EDCC7A',
+    900: '#F5E0A8',
+  },
+  secondary: {
+    50: '#141414',
+    100: '#1C1C1C',
+    200: '#242424',
+    300: '#2E2E2E',
+    400: '#4A4A4A',
+    500: '#6B6B6B',
+    600: '#8A8A8A',
+    700: '#AAAAAA',
+    800: '#CCCCCC',
+    900: '#F0EDE6',
+  },
+  accent: {
+    50: '#0D1F12',
+    100: '#122A18',
+    200: '#1A3E22',
+    300: '#245730',
+    400: '#2E7040',
+    500: '#3A8F52',
+    600: '#48A863',
+    700: '#5EBD78',
+    800: '#82CC96',
+    900: '#AEDDB8',
+  },
+  warning: {
+    50: '#fffbeb',
+    100: '#fef3c7',
+    200: '#fde68a',
+    300: '#fcd34d',
+    400: '#fbbf24',
+    500: '#f59e0b',
+    600: '#d97706',
+    700: '#b45309',
+    800: '#92400e',
+    900: '#78350f',
+  },
+  error: {
+    50: '#1F0D0D',
+    100: '#2A1212',
+    200: '#3D1818',
+    300: '#562020',
+    400: '#7A2D2D',
+    500: '#C0392B',
+    600: '#E74C3C',
+    700: '#EC7063',
+    800: '#F1948A',
+    900: '#FADBD8',
+  },
+  white: '#F0EDE6',
+  black: '#0D0D0D',
+  background: '#0D0D0D',
+  surface: '#181818',
+};
+
+export const dark = {
+  bg: '#0D0D0D',
+  surface: '#181818',
+  elevated: '#222222',
+  border: '#2C2C2C',
+  borderLight: '#383838',
+  text: '#F0EDE6',
+  textSecondary: '#8A8A8A',
+  textMuted: '#4A4A4A',
+  goldSurface: '#1E1A0A',
+};
+
+export const gold = {
+  50: '#FDF9EC',
+  100: '#F9EDCA',
+  200: '#F0D78A',
+  300: '#E5BD50',
+  400: '#D4A017',
+  500: '#B88C0E',
+  600: '#9A7208',
+  700: '#7A5A05',
+  800: '#5C4304',
+  900: '#3D2C02',
+};
+
+export const typography = {
+  fontFamily: {
+    regular: 'Inter_400Regular',
+    medium: 'Inter_500Medium',
+    semiBold: 'Inter_600SemiBold',
+    bold: 'Inter_700Bold',
+  },
+  fontSize: {
+    xs: 12,
+    sm: 14,
+    base: 16,
+    lg: 18,
+    xl: 20,
+    '2xl': 24,
+    '3xl': 30,
+    '4xl': 36,
+  },
+};
+
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  '2xl': 48,
+};
+
+export const borderRadius = {
+  sm: 4,
+  md: 8,
+  lg: 12,
+  xl: 16,
+  '2xl': 24,
+  full: 9999,
+};

@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Helping Hand AI",
+    "slug": "helping-hand-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "helpinghandai",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.helpinghand.ai"
+    },
+    "android": {
+      "package": "com.helpinghand.ai"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "backgroundColor": "#0D0D0D"
+    },
+    "plugins": ["expo-router", "expo-font", "expo-web-browser"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
