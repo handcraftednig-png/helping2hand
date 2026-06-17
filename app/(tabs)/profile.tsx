@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import { LogOut, Mail, User, Shield, CircleAlert, GraduationCap, RefreshCw } from 'lucide-react-native';
+import { LogOut, Mail, User, Shield, CircleAlert, GraduationCap, RefreshCw, BookOpen, Library } from 'lucide-react-native';
 import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +10,16 @@ interface ClassroomConnection {
   connected_at: string;
   last_synced_at: string | null;
 }
+
+interface LmsConnection {
+  base_url: string;
+  connected_at: string;
+  last_synced_at: string | null;
+}
+
+type LmsProvider = 'canvas' | 'moodle';
+
+const LMS_LABELS: Record<LmsProvider, string> = { canvas: 'Canvas', moodle: 'Moodle' };
 
 export default function ProfileScreen() {
   const { user, signOut, connectGoogleClassroom } = useAuth();
@@ -20,16 +30,29 @@ export default function ProfileScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
 
+  const [canvasConnection, setCanvasConnection] = useState<LmsConnection | null>(null);
+  const [moodleConnection, setMoodleConnection] = useState<LmsConnection | null>(null);
+  const [lmsSyncing, setLmsSyncing] = useState<LmsProvider | null>(null);
+
+  const [connectModal, setConnectModal] = useState<LmsProvider | null>(null);
+  const [modalUrl, setModalUrl] = useState('');
+  const [modalToken, setModalToken] = useState('');
+  const [modalConnecting, setModalConnecting] = useState(false);
+  const [modalError, setModalError] = useState('');
+
   useEffect(() => {
-    loadConnection();
+    loadConnections();
   }, []);
 
-  const loadConnection = async () => {
-    const { data } = await supabase
-      .from('classroom_connections')
-      .select('connected_at,last_synced_at')
-      .maybeSingle();
-    setConnection(data ?? null);
+  const loadConnections = async () => {
+    const [classroom, canvas, moodle] = await Promise.all([
+      supabase.from('classroom_connections').select('connected_at,last_synced_at').maybeSingle(),
+      supabase.from('canvas_connections').select('base_url,connected_at,last_synced_at').maybeSingle(),
+      supabase.from('moodle_connections').select('base_url,connected_at,last_synced_at').maybeSingle(),
+    ]);
+    setConnection(classroom.data ?? null);
+    setCanvasConnection(canvas.data ?? null);
+    setMoodleConnection(moodle.data ?? null);
   };
 
   const handleConnectClassroom = async () => {
@@ -41,7 +64,7 @@ export default function ProfileScreen() {
       setErrorMsg(error.message);
       return;
     }
-    await loadConnection();
+    await loadConnections();
     handleSyncClassroom();
   };
 
@@ -56,13 +79,62 @@ export default function ProfileScreen() {
       return;
     }
     setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
-    await loadConnection();
+    await loadConnections();
   };
 
   const handleDisconnectClassroom = async () => {
     await supabase.from('classroom_connections').delete().eq('user_id', user?.id ?? '');
     setConnection(null);
     setSyncMessage('');
+  };
+
+  const handleSyncLms = async (provider: LmsProvider) => {
+    setErrorMsg('');
+    setSyncMessage('');
+    setLmsSyncing(provider);
+    const { data, error } = await supabase.functions.invoke(`${provider}-sync`);
+    setLmsSyncing(null);
+    if (error) {
+      setErrorMsg(error.message ?? 'Sync failed');
+      return;
+    }
+    setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
+    await loadConnections();
+  };
+
+  const handleDisconnectLms = async (provider: LmsProvider) => {
+    await supabase.from(`${provider}_connections`).delete().eq('user_id', user?.id ?? '');
+    if (provider === 'canvas') setCanvasConnection(null);
+    else setMoodleConnection(null);
+    setSyncMessage('');
+  };
+
+  const openConnectModal = (provider: LmsProvider) => {
+    setModalUrl('');
+    setModalToken('');
+    setModalError('');
+    setConnectModal(provider);
+  };
+
+  const handleModalConnect = async () => {
+    if (!connectModal) return;
+    if (!modalUrl.trim() || !modalToken.trim()) {
+      setModalError('Enter both the site URL and your access token');
+      return;
+    }
+    setModalError('');
+    setModalConnecting(true);
+    const { data, error } = await supabase.functions.invoke(`${connectModal}-sync`, {
+      body: { base_url: modalUrl.trim(), access_token: modalToken.trim() },
+    });
+    setModalConnecting(false);
+    if (error) {
+      setModalError(error.message ?? 'Connection failed');
+      return;
+    }
+    setConnectModal(null);
+    setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
+    await loadConnections();
   };
 
   const confirmSignOut = async () => {
@@ -125,7 +197,7 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Integrations</Text>
 
-          <View style={[styles.menuItem, styles.menuItemLast]}>
+          <View style={styles.menuItem}>
             <View style={styles.menuIconContainer}>
               <GraduationCap size={20} color={gold[400]} />
             </View>
@@ -152,6 +224,66 @@ export default function ProfileScreen() {
               <TouchableOpacity style={styles.connectBtn} onPress={handleConnectClassroom} disabled={connecting}>
                 {connecting ? <ActivityIndicator size="small" color={dark.bg} /> : null}
                 <Text style={styles.connectBtnText}>{connecting ? 'Connecting...' : 'Connect Google Classroom'}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.menuItem}>
+            <View style={styles.menuIconContainer}>
+              <BookOpen size={20} color={gold[400]} />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuLabel}>Canvas</Text>
+              <Text style={styles.menuValue}>
+                {canvasConnection ? `Connected · last synced ${canvasConnection.last_synced_at ? new Date(canvasConnection.last_synced_at).toLocaleString() : 'never'}` : 'Not connected'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.integrationActions}>
+            {canvasConnection ? (
+              <>
+                <TouchableOpacity style={styles.syncBtn} onPress={() => handleSyncLms('canvas')} disabled={lmsSyncing === 'canvas'}>
+                  {lmsSyncing === 'canvas' ? <ActivityIndicator size="small" color={gold[400]} /> : <RefreshCw size={15} color={gold[400]} />}
+                  <Text style={styles.syncBtnText}>{lmsSyncing === 'canvas' ? 'Syncing...' : 'Sync Now'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.disconnectBtn} onPress={() => handleDisconnectLms('canvas')}>
+                  <Text style={styles.disconnectBtnText}>Disconnect</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity style={styles.connectBtn} onPress={() => openConnectModal('canvas')}>
+                <Text style={styles.connectBtnText}>Connect Canvas</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={[styles.menuItem, styles.menuItemLast]}>
+            <View style={styles.menuIconContainer}>
+              <Library size={20} color={gold[400]} />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuLabel}>Moodle</Text>
+              <Text style={styles.menuValue}>
+                {moodleConnection ? `Connected · last synced ${moodleConnection.last_synced_at ? new Date(moodleConnection.last_synced_at).toLocaleString() : 'never'}` : 'Not connected'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.integrationActions}>
+            {moodleConnection ? (
+              <>
+                <TouchableOpacity style={styles.syncBtn} onPress={() => handleSyncLms('moodle')} disabled={lmsSyncing === 'moodle'}>
+                  {lmsSyncing === 'moodle' ? <ActivityIndicator size="small" color={gold[400]} /> : <RefreshCw size={15} color={gold[400]} />}
+                  <Text style={styles.syncBtnText}>{lmsSyncing === 'moodle' ? 'Syncing...' : 'Sync Now'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.disconnectBtn} onPress={() => handleDisconnectLms('moodle')}>
+                  <Text style={styles.disconnectBtnText}>Disconnect</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity style={styles.connectBtn} onPress={() => openConnectModal('moodle')}>
+                <Text style={styles.connectBtnText}>Connect Moodle</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -183,6 +315,55 @@ export default function ProfileScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalConfirmBtn} onPress={confirmSignOut}>
                 <Text style={styles.modalConfirmText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal animationType="fade" transparent visible={connectModal !== null} onRequestClose={() => setConnectModal(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Connect {connectModal ? LMS_LABELS[connectModal] : ''}</Text>
+            <Text style={styles.modalMessage}>
+              {connectModal === 'canvas'
+                ? "Enter your school's Canvas URL and a personal access token (Account → Settings → New Access Token in Canvas)."
+                : "Enter your school's Moodle URL and a web service token (ask your Moodle admin if you don't have one)."}
+            </Text>
+
+            {!!modalError && (
+              <View style={[styles.errorBanner, { marginTop: 0, marginBottom: spacing.md }]}>
+                <CircleAlert size={16} color={colors.error[600]} />
+                <Text style={styles.errorBannerText}>{modalError}</Text>
+              </View>
+            )}
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder={connectModal === 'canvas' ? 'yourschool.instructure.com' : 'yourschool.moodlecloud.com'}
+              placeholderTextColor={dark.textMuted}
+              value={modalUrl}
+              onChangeText={setModalUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Access token"
+              placeholderTextColor={dark.textMuted}
+              value={modalToken}
+              onChangeText={setModalToken}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setConnectModal(null)} disabled={modalConnecting}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleModalConnect} disabled={modalConnecting}>
+                {modalConnecting ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Connect</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -279,6 +460,11 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, color: dark.text, marginBottom: 8 },
   modalMessage: { fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.textSecondary, marginBottom: spacing.lg },
+  modalInput: {
+    fontFamily: 'Inter_400Regular', fontSize: 15, color: dark.text,
+    backgroundColor: dark.elevated, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: dark.border,
+    paddingHorizontal: spacing.md, paddingVertical: 12, marginBottom: spacing.sm,
+  },
   modalActions: { flexDirection: 'row', gap: spacing.sm },
   modalCancelBtn: {
     flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, alignItems: 'center',
