@@ -8,6 +8,10 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Modal,
+  ActivityIndicator,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -33,6 +37,8 @@ import {
   Brain,
   Clock,
   ArrowLeft,
+  History,
+  Trash2,
 } from 'lucide-react-native';
 import { dark, gold } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -51,6 +57,13 @@ interface QuickAction {
   title: string;
   description: string;
   prompt: string;
+}
+
+interface HistorySession {
+  session_id: string;
+  preview: string;
+  last_at: string;
+  count: number;
 }
 
 const quickActions: QuickAction[] = [
@@ -108,6 +121,12 @@ function formatTime(isoString: string) {
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12 || 12;
   return `${hours}:${minutes} ${ampm}`;
+}
+
+function formatHistoryLabel(isoString: string) {
+  const d = new Date(isoString);
+  const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${datePart} · ${formatTime(isoString)}`;
 }
 
 // ─── Animated background orbs ────────────────────────────────────────────────
@@ -426,7 +445,9 @@ function ImproveBanner({
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
-const MAIN_SESSION = 'main';
+function newMainSessionId() {
+  return `main-${Date.now()}`;
+}
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -434,15 +455,31 @@ export default function ChatScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
   const [improveBanner, setImproveBanner] = useState<{ text: string; notes: string[] } | null>(null);
-  const [sessionId, setSessionId] = useState(MAIN_SESSION);
+  const [liveMainSessionId, setLiveMainSessionId] = useState(newMainSessionId);
+  const [sessionId, setSessionId] = useState(liveMainSessionId);
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [historyItems, setHistoryItems] = useState<HistorySession[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   const bannerOpacity = useSharedValue(0);
   const sendGlow = useSharedValue(0);
 
+  // Starting a brand-new main session id means there's nothing to load for it yet —
+  // no DB call needed on first mount.
+
   useEffect(() => {
-    loadMessages(MAIN_SESSION);
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'background') {
+        const freshId = newMainSessionId();
+        setLiveMainSessionId(freshId);
+        setSessionId(freshId);
+        setSessionTitle(null);
+        setMessages([]);
+      }
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -460,9 +497,58 @@ export default function ChatScreen() {
   };
 
   const returnToMainChat = () => {
-    setSessionId(MAIN_SESSION);
+    setSessionId(liveMainSessionId);
     setSessionTitle(null);
-    loadMessages(MAIN_SESSION);
+    loadMessages(liveMainSessionId);
+  };
+
+  const openHistory = async () => {
+    setHistoryVisible(true);
+    setLoadingHistory(true);
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('session_id, content, created_at')
+      .order('created_at', { ascending: true })
+      .limit(2000);
+    setLoadingHistory(false);
+    if (error || !data) return;
+
+    const groups = new Map<string, HistorySession>();
+    for (const row of data as { session_id: string; content: string; created_at: string }[]) {
+      const existing = groups.get(row.session_id);
+      if (!existing) {
+        groups.set(row.session_id, {
+          session_id: row.session_id,
+          preview: row.content,
+          last_at: row.created_at,
+          count: 1,
+        });
+      } else {
+        existing.last_at = row.created_at;
+        existing.count += 1;
+      }
+    }
+    const list = Array.from(groups.values()).sort(
+      (a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime()
+    );
+    setHistoryItems(list);
+  };
+
+  const openHistorySession = (item: HistorySession) => {
+    setSessionId(item.session_id);
+    setSessionTitle(formatHistoryLabel(item.last_at));
+    setHistoryVisible(false);
+    loadMessages(item.session_id);
+  };
+
+  const deleteHistorySession = async (sid: string) => {
+    await supabase.from('chat_messages').delete().eq('session_id', sid);
+    setHistoryItems(prev => prev.filter(h => h.session_id !== sid));
+    if (sid === sessionId) {
+      setSessionId(liveMainSessionId);
+      setSessionTitle(null);
+      setMessages([]);
+    }
   };
 
   const startTopicSession = (action: QuickAction) => {
@@ -637,7 +723,7 @@ export default function ChatScreen() {
         {/* Header */}
         <BlurView intensity={40} tint="dark" style={styles.header}>
           <View style={styles.headerInner}>
-            {sessionId !== MAIN_SESSION ? (
+            {sessionId !== liveMainSessionId ? (
               <TouchableOpacity
                 onPress={returnToMainChat}
                 style={styles.backBtn}
@@ -652,10 +738,16 @@ export default function ChatScreen() {
               <View style={styles.headerStatusRow}>
                 <View style={[styles.statusDot, isLoading && styles.statusDotActive]} />
                 <Text style={styles.headerStatus}>
-                  {isLoading ? 'Thinking...' : sessionId !== MAIN_SESSION ? 'Tap back for main chat' : 'AI study assistant'}
+                  {isLoading ? 'Thinking...' : sessionId !== liveMainSessionId ? 'Tap back for main chat' : 'AI study assistant'}
                 </Text>
               </View>
             </View>
+            <TouchableOpacity
+              style={styles.historyBtn}
+              onPress={openHistory}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <History size={18} color={dark.textSecondary} />
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.improveBtn, isImproving && styles.improveBtnActive]}
               onPress={triggerSelfImprove}
@@ -748,6 +840,50 @@ export default function ChatScreen() {
         </BlurView>
 
       </KeyboardAvoidingView>
+
+      {/* History modal */}
+      <Modal animationType="slide" transparent visible={historyVisible} onRequestClose={() => setHistoryVisible(false)}>
+        <View style={styles.historyOverlay}>
+          <View style={styles.historySheet}>
+            <View style={styles.historyHandle} />
+            <View style={styles.historyHeaderRow}>
+              <Text style={styles.historyTitle}>Past Conversations</Text>
+              <TouchableOpacity onPress={() => setHistoryVisible(false)}>
+                <X size={22} color={dark.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingHistory ? (
+              <ActivityIndicator color={G} style={{ marginVertical: 32 }} />
+            ) : historyItems.length === 0 ? (
+              <Text style={styles.historyEmpty}>No past conversations yet.</Text>
+            ) : (
+              <FlatList
+                data={historyItems}
+                keyExtractor={item => item.session_id}
+                style={{ maxHeight: 420 }}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.historyRow} onPress={() => openHistorySession(item)}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.historyPreview} numberOfLines={1}>{item.preview}</Text>
+                      <Text style={styles.historyMeta}>
+                        {formatHistoryLabel(item.last_at)} · {item.count} message{item.count === 1 ? '' : 's'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => deleteHistorySession(item.session_id)}
+                      style={styles.historyDeleteBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Trash2 size={18} color={dark.textMuted} />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -855,6 +991,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: 12,
     color: dark.textSecondary,
+  },
+  historyBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
   improveBtn: {
     flexDirection: 'row',
@@ -1164,4 +1308,23 @@ const styles = StyleSheet.create({
     color: dark.textSecondary,
     lineHeight: 17,
   },
+
+  // ─ History modal
+  historyOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.8)' },
+  historySheet: {
+    backgroundColor: '#141414', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 20, paddingBottom: 40, maxHeight: '75%',
+    borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: `${G}30`,
+  },
+  historyHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#2C2C2C', alignSelf: 'center', marginBottom: 16 },
+  historyHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  historyTitle: { fontFamily: 'Inter_700Bold', fontSize: 19, color: '#F0EDE6' },
+  historyEmpty: { fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.textMuted, textAlign: 'center', paddingVertical: 32 },
+  historyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#222222',
+  },
+  historyPreview: { fontFamily: 'Inter_500Medium', fontSize: 14, color: '#F0EDE6', marginBottom: 3 },
+  historyMeta: { fontFamily: 'Inter_400Regular', fontSize: 12, color: dark.textSecondary },
+  historyDeleteBtn: { padding: 4 },
 });
