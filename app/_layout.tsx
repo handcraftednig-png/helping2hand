@@ -1,9 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { SplashScreen } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -12,19 +11,24 @@ import {
 } from '@expo-google-fonts/inter';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { colors, dark, gold } from '@/lib/theme';
+import { dark } from '@/lib/theme';
+import { SplashFadeIn } from '@/components/SplashFadeIn';
 
 SplashScreen.preventAutoHideAsync();
 
+const MIN_SPLASH_MS = 1400;
+
 function AppNavigator() {
   const { user, loading } = useAuth();
+  const [minSplashDone, setMinSplashDone] = useState(false);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: dark.bg }}>
-        <ActivityIndicator size="large" color={gold[400]} />
-      </View>
-    );
+  useEffect(() => {
+    const timer = setTimeout(() => setMinSplashDone(true), MIN_SPLASH_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading || !minSplashDone) {
+    return <SplashFadeIn />;
   }
 
   return (
