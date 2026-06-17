@@ -35,17 +35,16 @@ function AppNavigator() {
     <Stack
       screenOptions={{ headerShown: false, contentStyle: { backgroundColor: dark.bg } }}
       initialRouteName={user ? '(tabs)' : 'auth/signup'}>
+      <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
       {user ? (
         <>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </>
       ) : (
         <>
           <Stack.Screen name="auth/signup" options={{ headerShown: false }} />
           <Stack.Screen name="auth/login" options={{ headerShown: false }} />
-          <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </>
       )}
