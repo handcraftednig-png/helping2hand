@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { Session, User } from '@supabase/supabase-js';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
@@ -57,6 +58,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async () => {
     const redirectTo = Linking.createURL('auth/callback');
 
+    if (Platform.OS === 'web') {
+      // Popups opened after an `await` are blocked by browsers — do a normal
+      // full-page redirect instead; app/auth/callback.tsx picks up the result.
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+      });
+      return { error: error as Error | null };
+    }
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo, skipBrowserRedirect: true },
@@ -81,7 +92,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const connectGoogleClassroom = async () => {
-    const redirectTo = Linking.createURL('auth/callback');
+    const redirectTo = Linking.createURL('auth/callback', { queryParams: { intent: 'classroom' } });
+
+    if (Platform.OS === 'web') {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          scopes: CLASSROOM_SCOPES,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+        },
+      });
+      return { error: error as Error | null };
+    }
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
