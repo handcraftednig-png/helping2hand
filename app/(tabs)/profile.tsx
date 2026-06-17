@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { router } from 'expo-router';
-import { LogOut, Mail, User, Shield } from 'lucide-react-native';
-import { dark, gold, spacing, borderRadius } from '@/lib/theme';
+import { LogOut, Mail, User, Shield, CircleAlert } from 'lucide-react-native';
+import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const confirmSignOut = async () => {
     setConfirmVisible(false);
     const { error } = await signOut();
     if (error) {
-      Alert.alert('Sign Out Failed', error.message);
+      setErrorMsg(error.message);
       return;
     }
     router.replace('/auth/login');
@@ -65,6 +66,13 @@ export default function ProfileScreen() {
             </View>
           </View>
         </View>
+
+        {!!errorMsg && (
+          <View style={styles.errorBanner}>
+            <CircleAlert size={16} color={colors.error[600]} />
+            <Text style={styles.errorBannerText}>{errorMsg}</Text>
+          </View>
+        )}
 
         <TouchableOpacity style={styles.signOutButton} onPress={() => setConfirmVisible(true)}>
           <LogOut size={20} color={dark.bg} />
@@ -134,6 +142,13 @@ const styles = StyleSheet.create({
   menuContent: { flex: 1 },
   menuLabel: { fontFamily: 'Inter_400Regular', fontSize: 13, color: dark.textSecondary, marginBottom: 2 },
   menuValue: { fontFamily: 'Inter_500Medium', fontSize: 15, color: dark.text },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.error[100], borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: `${colors.error[600]}50`,
+    padding: spacing.sm, marginTop: spacing.lg,
+  },
+  errorBannerText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.error[700] },
   signOutButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#C0392B', paddingVertical: spacing.md,
