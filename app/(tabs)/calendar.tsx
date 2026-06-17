@@ -6,7 +6,7 @@ import {
 import {
   ChevronLeft, ChevronRight, Plus, AlertTriangle, CheckCircle,
   Clock, X, TrendingUp, Zap, Target, Dumbbell, BookOpen,
-  Moon, Trash2, Calendar, ListChecks, Sparkles,
+  Moon, Trash2, Calendar, ListChecks, Sparkles, Award,
 } from 'lucide-react-native';
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -19,9 +19,11 @@ const CELL_SIZE = (width - spacing.lg * 2 - spacing.sm * 6) / 7;
 interface Assignment {
   id: string; title: string; subject: string;
   due_date: string; priority: string; status: string; is_exam: boolean;
+  grade: number | null; max_grade: number | null;
 }
 interface Exam {
   id: string; title: string; subject: string; exam_date: string; status: string;
+  grade: number | null; max_grade: number | null;
 }
 interface ScheduleBlock {
   id: string; date: string; title: string; type: string;
@@ -109,6 +111,13 @@ export default function CalendarScreen() {
   const [goalFreq, setGoalFreq] = useState<GoalFreq>('daily');
   const [goalMins, setGoalMins] = useState('30');
 
+  // Record grade modal
+  const [gradeModal, setGradeModal] = useState(false);
+  const [gradeTarget, setGradeTarget] = useState<{ id: string; title: string; isExam: boolean } | null>(null);
+  const [gradeValue, setGradeValue] = useState('');
+  const [gradeMaxValue, setGradeMaxValue] = useState('100');
+  const [savingGrade, setSavingGrade] = useState(false);
+
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
 
@@ -123,8 +132,8 @@ export default function CalendarScreen() {
     console.log('[loadAll] user:', user?.id, 'range:', start, '→', end);
 
     const [{ data: asgn, error: asgnErr }, { data: examRows, error: exmErr }, { data: blk, error: blkErr }] = await Promise.all([
-      supabase.from('assignments').select('id,title,subject,due_date,priority,status,is_exam').gte('due_date', start).lte('due_date', end),
-      supabase.from('assignments').select('id,title,subject,due_date,status').eq('is_exam', true).gte('due_date', start).lte('due_date', end),
+      supabase.from('assignments').select('id,title,subject,due_date,priority,status,is_exam,grade,max_grade').gte('due_date', start).lte('due_date', end),
+      supabase.from('assignments').select('id,title,subject,due_date,status,grade,max_grade').eq('is_exam', true).gte('due_date', start).lte('due_date', end),
       supabase.from('schedule_blocks').select('*').gte('date', start).lte('date', end),
     ]);
     if (asgnErr) console.error('[loadAll] assignments error:', asgnErr.message);
@@ -135,6 +144,7 @@ export default function CalendarScreen() {
     setExams((examRows || []).map(a => ({
       id: a.id, title: a.title, subject: a.subject,
       exam_date: a.due_date, status: a.status,
+      grade: a.grade, max_grade: a.max_grade,
     })));
     setBlocks(blk || []);
   };
@@ -376,6 +386,42 @@ export default function CalendarScreen() {
     loadGoals();
   };
 
+  // ── Grade recording ───────────────────────────────────────────────────────
+  const openGradeModal = (id: string, title: string, isExam: boolean, currentGrade: number | null, currentMaxGrade: number | null) => {
+    setGradeTarget({ id, title, isExam });
+    setGradeValue(currentGrade != null ? String(currentGrade) : '');
+    setGradeMaxValue(currentMaxGrade != null ? String(currentMaxGrade) : '100');
+    setGradeModal(true);
+  };
+
+  const saveGrade = async () => {
+    if (!gradeTarget || !gradeValue.trim()) return;
+    setSavingGrade(true);
+
+    const grade = parseFloat(gradeValue);
+    const maxGrade = parseFloat(gradeMaxValue) || 100;
+
+    const { error } = await supabase.from('assignments')
+      .update({ grade, max_grade: maxGrade, status: 'completed' })
+      .eq('id', gradeTarget.id);
+
+    setSavingGrade(false);
+    if (error) {
+      console.error('[saveGrade] failed:', error.message);
+      Alert.alert('Error', 'Could not save grade: ' + error.message);
+      return;
+    }
+
+    if (gradeTarget.isExam) {
+      setExams(prev => prev.map(e => e.id === gradeTarget.id ? { ...e, grade, max_grade: maxGrade, status: 'completed' } : e));
+    } else {
+      setAssignments(prev => prev.map(a => a.id === gradeTarget.id ? { ...a, grade, max_grade: maxGrade, status: 'completed' } : a));
+    }
+
+    setGradeModal(false);
+    setGradeTarget(null);
+  };
+
   // ── Calendar view ─────────────────────────────────────────────────────────
   const renderCalendar = () => {
     const days = getDaysInMonth();
@@ -481,8 +527,22 @@ export default function CalendarScreen() {
             {sel.exams.map(e => (
               <View key={e.id} style={[styles.dayItem, { borderLeftColor: '#C0392B' }]}>
                 <Text style={styles.dayItemBadge}>EXAM</Text>
-                <Text style={styles.dayItemTitle}>{e.title}</Text>
-                <Text style={styles.dayItemSub}>{e.subject}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.dayItemTitle}>{e.title}</Text>
+                  <Text style={styles.dayItemSub}>{e.subject}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.gradeBtn}
+                  onPress={() => openGradeModal(e.id, e.title, true, e.grade, e.max_grade)}>
+                  {e.grade != null ? (
+                    <Text style={styles.gradeBtnText}>{e.grade}/{e.max_grade ?? 100}</Text>
+                  ) : (
+                    <>
+                      <Award size={12} color={gold[400]} />
+                      <Text style={styles.gradeBtnText}>Grade</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
             ))}
             {sel.assignments.map(a => (
@@ -492,6 +552,18 @@ export default function CalendarScreen() {
                   <Text style={styles.dayItemTitle}>{a.title}</Text>
                   <Text style={styles.dayItemSub}>{a.subject} · {a.status.replace('_', ' ')}</Text>
                 </View>
+                <TouchableOpacity
+                  style={styles.gradeBtn}
+                  onPress={() => openGradeModal(a.id, a.title, false, a.grade, a.max_grade)}>
+                  {a.grade != null ? (
+                    <Text style={styles.gradeBtnText}>{a.grade}/{a.max_grade ?? 100}</Text>
+                  ) : (
+                    <>
+                      <Award size={12} color={gold[400]} />
+                      <Text style={styles.gradeBtnText}>Grade</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
             ))}
             {sel.blocks.map(b => (
@@ -760,6 +832,44 @@ export default function CalendarScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Record Grade Modal */}
+      <Modal animationType="slide" transparent visible={gradeModal} onRequestClose={() => setGradeModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalRow}>
+              <Text style={styles.modalTitle}>Record Grade</Text>
+              <TouchableOpacity onPress={() => setGradeModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
+            </View>
+            {gradeTarget && <Text style={styles.fieldLabel}>{gradeTarget.title}</Text>}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                placeholder="Score"
+                placeholderTextColor={dark.textMuted}
+                value={gradeValue}
+                onChangeText={setGradeValue}
+                keyboardType="numeric"
+              />
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                placeholder="Out of (default 100)"
+                placeholderTextColor={dark.textMuted}
+                value={gradeMaxValue}
+                onChangeText={setGradeMaxValue}
+                keyboardType="numeric"
+              />
+            </View>
+            <TouchableOpacity
+              style={[styles.submitBtn, (savingGrade || !gradeValue.trim()) && { opacity: 0.7 }]}
+              onPress={saveGrade}
+              disabled={savingGrade || !gradeValue.trim()}>
+              <Text style={styles.submitText}>{savingGrade ? 'Saving...' : 'Save Grade'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -856,6 +966,13 @@ const styles = StyleSheet.create({
   emptyDay: { fontFamily: 'Inter_400Regular', fontSize: 13, color: dark.textMuted, padding: 14 },
   emptyCircle: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: dark.borderLight },
   emptyCircleSmall: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: dark.borderLight },
+  gradeBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 5,
+    backgroundColor: dark.elevated, borderRadius: borderRadius.full,
+    borderWidth: 1, borderColor: `${gold[400]}40`,
+  },
+  gradeBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: gold[400] },
 
   // Week view
   generateBtn: {
