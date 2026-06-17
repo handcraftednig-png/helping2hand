@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { router } from 'expo-router';
 import { LogOut, Mail, User, Shield } from 'lucide-react-native';
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
@@ -7,22 +7,12 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
+  const [confirmVisible, setConfirmVisible] = useState(false);
 
-  const handleSignOut = async () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out', style: 'destructive',
-        onPress: async () => {
-          const { error } = await signOut();
-          if (error) {
-            Alert.alert('Sign Out Failed', error.message);
-            return;
-          }
-          router.replace('/auth/login');
-        },
-      },
-    ]);
+  const confirmSignOut = async () => {
+    setConfirmVisible(false);
+    await signOut();
+    router.replace('/auth/login');
   };
 
   const getUserInitial = () => {
@@ -44,7 +34,7 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{user?.email || 'User'}</Text>
-            <Text style={styles.profileLabel}>Helping Hand AI</Text>
+            <Text style={styles.profileLabel}>Helping Hand AI Student</Text>
           </View>
         </View>
 
@@ -72,11 +62,28 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+        <TouchableOpacity style={styles.signOutButton} onPress={() => setConfirmVisible(true)}>
           <LogOut size={20} color={dark.bg} />
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal animationType="fade" transparent visible={confirmVisible} onRequestClose={() => setConfirmVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Sign Out</Text>
+            <Text style={styles.modalMessage}>Are you sure you want to sign out?</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setConfirmVisible(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={confirmSignOut}>
+                <Text style={styles.modalConfirmText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -130,4 +137,22 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#E74C3C40',
   },
   signOutText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: dark.bg },
+  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', padding: spacing.lg },
+  modalCard: {
+    width: '100%', maxWidth: 360, backgroundColor: dark.surface, borderRadius: borderRadius.xl,
+    padding: spacing.lg, borderWidth: 1, borderColor: `${gold[400]}30`,
+  },
+  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, color: dark.text, marginBottom: 8 },
+  modalMessage: { fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.textSecondary, marginBottom: spacing.lg },
+  modalActions: { flexDirection: 'row', gap: spacing.sm },
+  modalCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, alignItems: 'center',
+    backgroundColor: dark.elevated, borderWidth: 1, borderColor: dark.border,
+  },
+  modalCancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: dark.textSecondary },
+  modalConfirmBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, alignItems: 'center',
+    backgroundColor: '#C0392B', borderWidth: 1, borderColor: '#E74C3C40',
+  },
+  modalConfirmText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#fff' },
 });
