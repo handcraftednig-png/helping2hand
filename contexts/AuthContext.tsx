@@ -61,16 +61,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (Platform.OS === 'web') {
       // Popups opened after an `await` are blocked by browsers — do a normal
       // full-page redirect instead; app/auth/callback.tsx picks up the result.
+      // `prompt: select_account` forces Google's account picker instead of
+      // silently reusing whatever Google account is already active in the
+      // browser, which is rarely the one the user means to sign in with.
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo },
+        options: { redirectTo, queryParams: { prompt: 'select_account' } },
       });
       return { error: error as Error | null };
     }
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo, skipBrowserRedirect: true },
+      options: { redirectTo, skipBrowserRedirect: true, queryParams: { prompt: 'select_account' } },
     });
     if (error) return { error: error as Error };
     if (!data?.url) return { error: new Error('No OAuth URL returned by Supabase') };
@@ -100,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         options: {
           redirectTo,
           scopes: CLASSROOM_SCOPES,
-          queryParams: { access_type: 'offline', prompt: 'consent' },
+          queryParams: { access_type: 'offline', prompt: 'select_account consent' },
         },
       });
       return { error: error as Error | null };
