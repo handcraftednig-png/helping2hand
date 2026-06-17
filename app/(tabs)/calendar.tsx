@@ -275,7 +275,13 @@ export default function CalendarScreen() {
     }
 
     if (toInsert.length > 0) {
-      await supabase.from('schedule_blocks').insert(toInsert);
+      const { error: insertErr } = await supabase.from('schedule_blocks').insert(toInsert);
+      if (insertErr) {
+        console.error('[generateSchedule] insert failed:', insertErr.message);
+        setGenerating(false);
+        Alert.alert('Error', 'Could not generate schedule: ' + insertErr.message);
+        return;
+      }
     }
 
     setGenerating(false);
