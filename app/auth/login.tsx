@@ -7,12 +7,11 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
-import { Mail, Lock, Eye, EyeOff, GraduationCap } from 'lucide-react-native';
-import { dark, gold, spacing, borderRadius } from '@/lib/theme';
+import { Mail, Lock, Eye, EyeOff, GraduationCap, CircleAlert } from 'lucide-react-native';
+import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
@@ -21,26 +20,29 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const { signInWithEmail, signInWithGoogle } = useAuth();
 
   const handleEmailLogin = async () => {
+    setErrorMsg('');
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter your email and password');
+      setErrorMsg('Please enter your email and password');
       return;
     }
     setLoading(true);
     const { error } = await signInWithEmail(email.trim(), password.trim());
     setLoading(false);
-    if (error) { Alert.alert('Login Failed', error.message); return; }
+    if (error) { setErrorMsg(error.message); return; }
     router.replace('/(tabs)');
   };
 
   const handleGoogleLogin = async () => {
+    setErrorMsg('');
     setGoogleLoading(true);
     const { error } = await signInWithGoogle();
     setGoogleLoading(false);
-    if (error) { Alert.alert('Login Failed', error.message); }
+    if (error) { setErrorMsg(error.message); }
   };
 
   return (
@@ -55,6 +57,13 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.form}>
+          {!!errorMsg && (
+            <View style={styles.errorBanner}>
+              <CircleAlert size={16} color={colors.error[600]} />
+              <Text style={styles.errorBannerText}>{errorMsg}</Text>
+            </View>
+          )}
+
           <View style={styles.inputContainer}>
             <Mail size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
@@ -139,6 +148,13 @@ const styles = StyleSheet.create({
   title: { fontFamily: 'Inter_700Bold', fontSize: 32, color: dark.text, marginBottom: 8 },
   subtitle: { fontFamily: 'Inter_400Regular', fontSize: 16, color: dark.textSecondary },
   form: { marginBottom: spacing.xl },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.error[100], borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: `${colors.error[600]}50`,
+    padding: spacing.sm, marginBottom: spacing.md,
+  },
+  errorBannerText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.error[700] },
   inputContainer: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: dark.surface,
     borderRadius: borderRadius.lg, borderWidth: 1, borderColor: dark.border,

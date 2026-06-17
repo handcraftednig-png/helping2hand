@@ -28,7 +28,9 @@ function AppNavigator() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: dark.bg } }}>
+    <Stack
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: dark.bg } }}
+      initialRouteName={user ? '(tabs)' : 'auth/signup'}>
       {user ? (
         <>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -36,8 +38,8 @@ function AppNavigator() {
         </>
       ) : (
         <>
-          <Stack.Screen name="auth/login" options={{ headerShown: false }} />
           <Stack.Screen name="auth/signup" options={{ headerShown: false }} />
+          <Stack.Screen name="auth/login" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </>
       )}
