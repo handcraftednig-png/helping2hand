@@ -32,11 +32,11 @@ import {
   Zap,
   Brain,
   Clock,
+  ArrowLeft,
 } from 'lucide-react-native';
 import { dark, gold } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { PrayingHandsIcon } from '@/components/PrayingHandsIcon';
-import { useAuth } from '@/contexts/AuthContext';
 
 interface Message {
   id: string;
@@ -426,33 +426,51 @@ function ImproveBanner({
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
+const MAIN_SESSION = 'main';
+
 export default function ChatScreen() {
-  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
   const [improveBanner, setImproveBanner] = useState<{ text: string; notes: string[] } | null>(null);
+  const [sessionId, setSessionId] = useState(MAIN_SESSION);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   const bannerOpacity = useSharedValue(0);
   const sendGlow = useSharedValue(0);
 
   useEffect(() => {
-    if (user) loadMessages();
-  }, [user]);
+    loadMessages(MAIN_SESSION);
+  }, []);
 
   useEffect(() => {
     sendGlow.value = withTiming(inputText.trim() ? 1 : 0, { duration: 300 });
   }, [inputText]);
 
-  const loadMessages = async () => {
+  const loadMessages = async (sid: string) => {
     const { data, error } = await supabase
       .from('chat_messages')
       .select('*')
+      .eq('session_id', sid)
       .order('created_at', { ascending: true })
       .limit(100);
     if (!error && data) setMessages(data);
+  };
+
+  const returnToMainChat = () => {
+    setSessionId(MAIN_SESSION);
+    setSessionTitle(null);
+    loadMessages(MAIN_SESSION);
+  };
+
+  const startTopicSession = (action: QuickAction) => {
+    const newSessionId = `topic-${action.id}-${Date.now()}`;
+    setSessionId(newSessionId);
+    setSessionTitle(action.title);
+    setMessages([]);
+    sendMessage(action.prompt, newSessionId);
   };
 
   const showBanner = (text: string, notes: string[], duration = 6000) => {
@@ -486,7 +504,7 @@ export default function ChatScreen() {
     setIsImproving(false);
   };
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, sid: string = sessionId) => {
     if (!text.trim() || isLoading) return;
 
     setInputText('');
@@ -506,7 +524,7 @@ export default function ChatScreen() {
       chatHistory.push({ role: 'user', content: text.trim() });
 
       const { data, error } = await supabase.functions.invoke('openai-chat', {
-        body: { messages: chatHistory },
+        body: { messages: chatHistory, session_id: sid },
       });
 
       if (error) {
@@ -525,6 +543,7 @@ export default function ChatScreen() {
       const { data: dbMsgs, error: dbErr } = await supabase
         .from('chat_messages')
         .select('*')
+        .eq('session_id', sid)
         .order('created_at', { ascending: true })
         .limit(100);
 
@@ -599,7 +618,7 @@ export default function ChatScreen() {
             key={action.id}
             action={action}
             index={i}
-            onPress={() => sendMessage(action.prompt)}
+            onPress={() => startTopicSession(action)}
           />
         ))}
       </View>
@@ -618,13 +637,22 @@ export default function ChatScreen() {
         {/* Header */}
         <BlurView intensity={40} tint="dark" style={styles.header}>
           <View style={styles.headerInner}>
-            <GlowingAvatar size={42} />
+            {sessionId !== MAIN_SESSION ? (
+              <TouchableOpacity
+                onPress={returnToMainChat}
+                style={styles.backBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <ArrowLeft size={20} color={dark.text} />
+              </TouchableOpacity>
+            ) : (
+              <GlowingAvatar size={42} />
+            )}
             <View style={styles.headerText}>
-              <Text style={styles.headerName}>Helping Hand AI</Text>
+              <Text style={styles.headerName}>{sessionTitle ?? 'Helping Hand AI'}</Text>
               <View style={styles.headerStatusRow}>
                 <View style={[styles.statusDot, isLoading && styles.statusDotActive]} />
                 <Text style={styles.headerStatus}>
-                  {isLoading ? 'Thinking...' : 'AI study assistant'}
+                  {isLoading ? 'Thinking...' : sessionId !== MAIN_SESSION ? 'Tap back for main chat' : 'AI study assistant'}
                 </Text>
               </View>
             </View>
@@ -791,6 +819,12 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+  },
+  backBtn: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerName: {
     fontFamily: 'Inter_600SemiBold',

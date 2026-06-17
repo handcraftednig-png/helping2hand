@@ -176,7 +176,8 @@ Deno.serve(async (req: Request) => {
     if (!body || !Array.isArray(body.messages)) {
       return json({ error: "messages array required" }, 400);
     }
-    const { messages } = body as { messages: ChatMessage[] };
+    const { messages, session_id } = body as { messages: ChatMessage[]; session_id?: string };
+    const sessionId = session_id || "main";
 
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiApiKey) {
@@ -236,6 +237,7 @@ Deno.serve(async (req: Request) => {
     if (userId && latestUserMsg) {
       const { error } = await serviceClient.from("chat_messages").insert({
         user_id: userId,
+        session_id: sessionId,
         role: "user",
         content: latestUserMsg.content,
       });
@@ -273,6 +275,7 @@ Deno.serve(async (req: Request) => {
     if (userId) {
       const { error } = await serviceClient.from("chat_messages").insert({
         user_id: userId,
+        session_id: sessionId,
         role: "assistant",
         content: assistantContent,
       });
