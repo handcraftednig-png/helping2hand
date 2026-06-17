@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { LogOut, Mail, User, Shield } from 'lucide-react-native';
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
@@ -11,7 +11,11 @@ export default function ProfileScreen() {
 
   const confirmSignOut = async () => {
     setConfirmVisible(false);
-    await signOut();
+    const { error } = await signOut();
+    if (error) {
+      Alert.alert('Sign Out Failed', error.message);
+      return;
+    }
     router.replace('/auth/login');
   };
 
