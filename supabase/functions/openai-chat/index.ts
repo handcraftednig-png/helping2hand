@@ -230,19 +230,16 @@ Deno.serve(async (req: Request) => {
 
     const fullSystemPrompt = systemPrompt + userContext;
 
-    // Persist the user message (best-effort)
+    // Persist the user message (best-effort, but awaited so it's committed
+    // before the response returns and the client reloads chat history)
     const latestUserMsg = [...messages].reverse().find((m) => m.role === "user");
     if (userId && latestUserMsg) {
-      serviceClient
-        .from("chat_messages")
-        .insert({
-          user_id: userId,
-          role: "user",
-          content: latestUserMsg.content,
-        })
-        .then(({ error }) => {
-          if (error) console.error("chat_messages user insert:", error.message);
-        });
+      const { error } = await serviceClient.from("chat_messages").insert({
+        user_id: userId,
+        role: "user",
+        content: latestUserMsg.content,
+      });
+      if (error) console.error("chat_messages user insert:", error.message);
     }
 
     // Call OpenAI
@@ -272,19 +269,14 @@ Deno.serve(async (req: Request) => {
     const assistantContent: string =
       oaiData.choices?.[0]?.message?.content ?? "I couldn't generate a response.";
 
-    // Persist the assistant reply (best-effort)
+    // Persist the assistant reply (best-effort, but awaited — see above)
     if (userId) {
-      serviceClient
-        .from("chat_messages")
-        .insert({
-          user_id: userId,
-          role: "assistant",
-          content: assistantContent,
-        })
-        .then(({ error }) => {
-          if (error)
-            console.error("chat_messages assistant insert:", error.message);
-        });
+      const { error } = await serviceClient.from("chat_messages").insert({
+        user_id: userId,
+        role: "assistant",
+        content: assistantContent,
+      });
+      if (error) console.error("chat_messages assistant insert:", error.message);
     }
 
     return json({ message: assistantContent });
