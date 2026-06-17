@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { supabase } from '@/lib/supabase';
+
+WebBrowser.maybeCompleteAuthSession();
 
 interface AuthContextType {
   session: Session | null;
@@ -9,7 +13,7 @@ interface AuthContextType {
   signInWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUpWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
-  signOut: () => Promise<{ error: Error | null }>;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -47,13 +51,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-    return { error: error as Error | null };
+    const redirectTo = Linking.createURL('auth/callback');
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo, skipBrowserRedirect: true },
+    });
+    if (error) return { error: error as Error };
+    if (!data?.url) return { error: new Error('No OAuth URL returned by Supabase') };
+
+    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+    if (result.type !== 'success' || !result.url) {
+      return { error: new Error('Google sign-in was cancelled') };
+    }
+
+    const hashParams = new URLSearchParams(new URL(result.url).hash.replace(/^#/, ''));
+    const access_token = hashParams.get('access_token');
+    const refresh_token = hashParams.get('refresh_token');
+    if (!access_token || !refresh_token) {
+      return { error: new Error('No session tokens returned from Google sign-in') };
+    }
+
+    const { error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
+    return { error: sessionError as Error | null };
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    return { error: error as Error | null };
+    await supabase.auth.signOut();
   };
 
   return (
