@@ -13,8 +13,12 @@ interface AuthContextType {
   signInWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUpWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
+  connectGoogleClassroom: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<{ error: Error | null }>;
 }
+
+const CLASSROOM_SCOPES =
+  'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.coursework.me.readonly';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -76,6 +80,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: sessionError as Error | null };
   };
 
+  const connectGoogleClassroom = async () => {
+    const redirectTo = Linking.createURL('auth/callback');
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        skipBrowserRedirect: true,
+        scopes: CLASSROOM_SCOPES,
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+      },
+    });
+    if (error) return { error: error as Error };
+    if (!data?.url) return { error: new Error('No OAuth URL returned by Supabase') };
+
+    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+    if (result.type !== 'success' || !result.url) {
+      return { error: new Error('Google Classroom connection was cancelled') };
+    }
+
+    const hashParams = new URLSearchParams(new URL(result.url).hash.replace(/^#/, ''));
+    const access_token = hashParams.get('access_token');
+    const refresh_token = hashParams.get('refresh_token');
+    const provider_token = hashParams.get('provider_token');
+    const provider_refresh_token = hashParams.get('provider_refresh_token');
+    const expiresIn = parseInt(hashParams.get('expires_in') ?? '3600', 10);
+
+    if (access_token && refresh_token) {
+      await supabase.auth.setSession({ access_token, refresh_token });
+    }
+
+    if (!provider_token) {
+      return {
+        error: new Error(
+          'Google did not return Classroom access. Try disconnecting "Helping Hand AI" in your Google Account permissions and reconnecting.'
+        ),
+      };
+    }
+
+    const { data: userData } = await supabase.auth.getUser();
+    const uid = userData.user?.id;
+    if (!uid) return { error: new Error('Not signed in') };
+
+    const payload: Record<string, unknown> = {
+      user_id: uid,
+      access_token: provider_token,
+      expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
+      connected_at: new Date().toISOString(),
+    };
+    if (provider_refresh_token) payload.refresh_token = provider_refresh_token;
+
+    const { error: upsertError } = await supabase
+      .from('classroom_connections')
+      .upsert(payload, { onConflict: 'user_id' });
+
+    return { error: upsertError as Error | null };
+  };
+
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     return { error: error as Error | null };
@@ -90,6 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,
+        connectGoogleClassroom,
         signOut,
       }}>
       {children}

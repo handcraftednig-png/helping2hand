@@ -1,14 +1,69 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import { LogOut, Mail, User, Shield, CircleAlert } from 'lucide-react-native';
+import { LogOut, Mail, User, Shield, CircleAlert, GraduationCap, RefreshCw } from 'lucide-react-native';
 import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+interface ClassroomConnection {
+  connected_at: string;
+  last_synced_at: string | null;
+}
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, connectGoogleClassroom } = useAuth();
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [connection, setConnection] = useState<ClassroomConnection | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
+
+  useEffect(() => {
+    loadConnection();
+  }, []);
+
+  const loadConnection = async () => {
+    const { data } = await supabase
+      .from('classroom_connections')
+      .select('connected_at,last_synced_at')
+      .maybeSingle();
+    setConnection(data ?? null);
+  };
+
+  const handleConnectClassroom = async () => {
+    setErrorMsg('');
+    setConnecting(true);
+    const { error } = await connectGoogleClassroom();
+    setConnecting(false);
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+    await loadConnection();
+    handleSyncClassroom();
+  };
+
+  const handleSyncClassroom = async () => {
+    setErrorMsg('');
+    setSyncMessage('');
+    setSyncing(true);
+    const { data, error } = await supabase.functions.invoke('classroom-sync');
+    setSyncing(false);
+    if (error) {
+      setErrorMsg(error.message ?? 'Sync failed');
+      return;
+    }
+    setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
+    await loadConnection();
+  };
+
+  const handleDisconnectClassroom = async () => {
+    await supabase.from('classroom_connections').delete().eq('user_id', user?.id ?? '');
+    setConnection(null);
+    setSyncMessage('');
+  };
 
   const confirmSignOut = async () => {
     setConfirmVisible(false);
@@ -65,6 +120,43 @@ export default function ProfileScreen() {
               <Text style={[styles.menuValue, { color: '#3A8F52' }]}>Active</Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Integrations</Text>
+
+          <View style={[styles.menuItem, styles.menuItemLast]}>
+            <View style={styles.menuIconContainer}>
+              <GraduationCap size={20} color={gold[400]} />
+            </View>
+            <View style={styles.menuContent}>
+              <Text style={styles.menuLabel}>Google Classroom</Text>
+              <Text style={styles.menuValue}>
+                {connection ? `Connected · last synced ${connection.last_synced_at ? new Date(connection.last_synced_at).toLocaleString() : 'never'}` : 'Not connected'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.integrationActions}>
+            {connection ? (
+              <>
+                <TouchableOpacity style={styles.syncBtn} onPress={handleSyncClassroom} disabled={syncing}>
+                  {syncing ? <ActivityIndicator size="small" color={gold[400]} /> : <RefreshCw size={15} color={gold[400]} />}
+                  <Text style={styles.syncBtnText}>{syncing ? 'Syncing...' : 'Sync Now'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.disconnectBtn} onPress={handleDisconnectClassroom}>
+                  <Text style={styles.disconnectBtnText}>Disconnect</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity style={styles.connectBtn} onPress={handleConnectClassroom} disabled={connecting}>
+                {connecting ? <ActivityIndicator size="small" color={dark.bg} /> : null}
+                <Text style={styles.connectBtnText}>{connecting ? 'Connecting...' : 'Connect Google Classroom'}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {!!syncMessage && <Text style={styles.syncMessage}>{syncMessage}</Text>}
         </View>
 
         {!!errorMsg && (
@@ -142,6 +234,30 @@ const styles = StyleSheet.create({
   menuContent: { flex: 1 },
   menuLabel: { fontFamily: 'Inter_400Regular', fontSize: 13, color: dark.textSecondary, marginBottom: 2 },
   menuValue: { fontFamily: 'Inter_500Medium', fontSize: 15, color: dark.text },
+  integrationActions: {
+    flexDirection: 'row', gap: spacing.sm,
+    paddingHorizontal: spacing.md, paddingBottom: spacing.md, paddingTop: spacing.xs,
+  },
+  connectBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    backgroundColor: gold[400], paddingVertical: 12, borderRadius: borderRadius.lg,
+  },
+  connectBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: dark.bg },
+  syncBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    backgroundColor: dark.elevated, paddingVertical: 12, borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: `${gold[400]}40`,
+  },
+  syncBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: gold[400] },
+  disconnectBtn: {
+    paddingVertical: 12, paddingHorizontal: spacing.md, borderRadius: borderRadius.lg,
+    backgroundColor: dark.elevated, borderWidth: 1, borderColor: dark.border,
+  },
+  disconnectBtnText: { fontFamily: 'Inter_500Medium', fontSize: 14, color: dark.textSecondary },
+  syncMessage: {
+    fontFamily: 'Inter_400Regular', fontSize: 12, color: '#3A8F52',
+    paddingHorizontal: spacing.md, paddingBottom: spacing.md,
+  },
   errorBanner: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.error[100], borderRadius: borderRadius.lg,
