@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, ActivityIndicator, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { LogOut, Mail, User, Shield, CircleAlert, GraduationCap, RefreshCw, BookOpen, Library } from 'lucide-react-native';
 import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
@@ -173,7 +173,7 @@ export default function ProfileScreen() {
         <Text style={styles.headerSubtitle}>Manage your account</Text>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
             <Text style={styles.avatarText}>{getUserInitial()}</Text>
@@ -316,7 +316,7 @@ export default function ProfileScreen() {
           <LogOut size={20} color={dark.bg} />
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       <Modal animationType="fade" transparent visible={confirmVisible} onRequestClose={() => setConfirmVisible(false)}>
         <View style={styles.modalOverlay}>
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontFamily: 'Inter_700Bold', fontSize: 28, color: dark.text, marginBottom: 4 },
   headerSubtitle: { fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.textSecondary },
-  content: { padding: spacing.md },
+  content: { padding: spacing.md, paddingBottom: 100 },
   profileCard: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: dark.surface,
     borderRadius: borderRadius.xl, padding: spacing.lg, marginBottom: spacing.lg,
