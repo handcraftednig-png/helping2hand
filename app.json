@@ -21,9 +21,20 @@
       "favicon": "./assets/images/favicon.png",
       "backgroundColor": "#0D0D0D"
     },
-    "plugins": ["expo-router", "expo-font", "expo-web-browser"],
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser"
+    ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ea33d9d5-5fa5-4e6f-9d64-8863e07f028a"
+      }
+    },
+    "owner": "iceking12"
   }
 }
