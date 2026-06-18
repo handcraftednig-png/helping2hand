@@ -9,6 +9,7 @@ import {
   Modal,
   TextInput,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import {
   Plus, BookOpen, Clock, Play, Pause, RotateCcw,
@@ -20,6 +21,7 @@ import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePickerField } from '@/components/DatePickerField';
+import { haptics } from '@/lib/haptics';
 
 interface Assignment {
   id: string;
@@ -153,6 +155,7 @@ export default function StudyScreen() {
   const [newPriority, setNewPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [newCardFront, setNewCardFront] = useState('');
   const [newCardBack, setNewCardBack] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -163,6 +166,12 @@ export default function StudyScreen() {
     loadAssignments();
     loadExams();
     loadDecks();
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([loadAssignments(), loadExams(), loadDecks()]);
+    setRefreshing(false);
   };
 
   const loadAssignments = async () => {
@@ -252,11 +261,13 @@ export default function StudyScreen() {
     setSavingSession(false);
     if (error) {
       console.error('[saveStudySession] failed:', error.message);
+      haptics.warning();
       setSessionError('Could not save session: ' + error.message);
       return;
     }
     setSessionModal(false);
     setStudyTimer(0);
+    haptics.success();
     setSessionSaved(true);
     setTimeout(() => setSessionSaved(false), 2500);
   };
@@ -292,6 +303,7 @@ export default function StudyScreen() {
     setSavingAssignment(false);
     if (error) {
       console.error('[addAssignment] failed:', error.message, error.code);
+      haptics.warning();
       setSaveError('Could not save assignment: ' + error.message);
       return;
     }
@@ -304,6 +316,7 @@ export default function StudyScreen() {
     }
 
     loadAssignments();
+    haptics.success();
     setAssignmentSaved(true); setTimeout(() => setAssignmentSaved(false), 2500);
   };
 
@@ -333,6 +346,7 @@ export default function StudyScreen() {
     setSavingExam(false);
     if (error) {
       console.error('[addExam] failed:', error.message, error.code);
+      haptics.warning();
       setSaveError('Could not save exam: ' + error.message);
       return;
     }
@@ -349,6 +363,7 @@ export default function StudyScreen() {
     }
 
     resetForm(); setExamModal(false);
+    haptics.success();
     setExamSaved(true); setTimeout(() => setExamSaved(false), 2500);
     loadAssignments();
   };
@@ -360,6 +375,7 @@ export default function StudyScreen() {
     const { error } = await supabase.from('assignments').update({ status: next }).eq('id', a.id);
     if (error) {
       console.error('[toggleAssignmentStatus] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not update assignment: ' + error.message);
       return;
     }
@@ -382,6 +398,7 @@ export default function StudyScreen() {
     setSavingDeck(false);
     if (error) {
       console.error('[createDeck] failed:', error.message, error.code);
+      haptics.warning();
       Alert.alert('Error', 'Could not create deck: ' + error.message);
       return;
     }
@@ -397,6 +414,7 @@ export default function StudyScreen() {
     const { error } = await supabase.from('flashcard_decks').delete().eq('id', id);
     if (error) {
       console.error('[deleteDeck] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not delete deck: ' + error.message);
       return;
     }
@@ -419,6 +437,7 @@ export default function StudyScreen() {
     setSavingCard(false);
     if (error) {
       console.error('[addCard] failed:', error.message, error.code);
+      haptics.warning();
       Alert.alert('Error', 'Could not add card: ' + error.message);
       return;
     }
@@ -440,6 +459,7 @@ export default function StudyScreen() {
     const { error } = await supabase.from('flashcards').delete().eq('id', cardId);
     if (error) {
       console.error('[deleteCard] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not delete card: ' + error.message);
       return;
     }
@@ -470,7 +490,10 @@ export default function StudyScreen() {
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
   const renderDashboard = () => (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.dashScroll}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.dashScroll}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}>
 
       {(assignmentSaved || sessionSaved || examSaved) && (
         <View style={styles.savedBanner}>
@@ -531,7 +554,7 @@ export default function StudyScreen() {
                   <View style={[styles.priorityBadge, { backgroundColor: PRIORITY_COLORS[item.priority] + '22' }]}>
                     <Text style={[styles.priorityText, { color: PRIORITY_COLORS[item.priority] }]}>{item.priority}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => toggleAssignmentStatus(item)}>
+                  <TouchableOpacity onPress={() => toggleAssignmentStatus(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                     {item.status === 'completed' ? (
                       <CheckCircle size={18} color="#3A8F52" />
                     ) : item.status === 'in_progress' ? (
@@ -627,6 +650,7 @@ export default function StudyScreen() {
       <FlatList
         data={decks}
         keyExtractor={i => i.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}
         contentContainerStyle={styles.deckList}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={

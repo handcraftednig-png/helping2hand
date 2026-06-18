@@ -43,6 +43,7 @@ import {
 import { dark, gold } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { PrayingHandsIcon } from '@/components/PrayingHandsIcon';
+import { haptics } from '@/lib/haptics';
 
 interface Message {
   id: string;
@@ -593,6 +594,7 @@ export default function ChatScreen() {
   const sendMessage = async (text: string, sid: string = sessionId) => {
     if (!text.trim() || isLoading) return;
 
+    haptics.tap();
     setInputText('');
     setIsLoading(true);
 
@@ -856,7 +858,11 @@ export default function ChatScreen() {
             {loadingHistory ? (
               <ActivityIndicator color={G} style={{ marginVertical: 32 }} />
             ) : historyItems.length === 0 ? (
-              <Text style={styles.historyEmpty}>No past conversations yet.</Text>
+              <View style={styles.historyEmptyState}>
+                <History size={36} color={dark.textMuted} />
+                <Text style={styles.historyEmptyTitle}>No conversations yet</Text>
+                <Text style={styles.historyEmpty}>Your past chats with the AI tutor will show up here.</Text>
+              </View>
             ) : (
               <FlatList
                 data={historyItems}
@@ -1319,7 +1325,9 @@ const styles = StyleSheet.create({
   historyHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#2C2C2C', alignSelf: 'center', marginBottom: 16 },
   historyHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   historyTitle: { fontFamily: 'Inter_700Bold', fontSize: 19, color: '#F0EDE6' },
-  historyEmpty: { fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.textMuted, textAlign: 'center', paddingVertical: 32 },
+  historyEmptyState: { alignItems: 'center', paddingVertical: 40, gap: 10 },
+  historyEmptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: dark.textSecondary },
+  historyEmpty: { fontFamily: 'Inter_400Regular', fontSize: 13, color: dark.textMuted, textAlign: 'center', paddingHorizontal: 32 },
   historyRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#222222',

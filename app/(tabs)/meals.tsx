@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, TextInput, Alert, ActivityIndicator,
+  Modal, TextInput, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import {
   Plus, UtensilsCrossed, Flame, Beef, Wheat, Trash2, Calendar,
@@ -11,6 +11,7 @@ import {
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { haptics } from '@/lib/haptics';
 
 type Tab = 'log' | 'plan' | 'grocery';
 type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
@@ -125,9 +126,16 @@ export default function MealsScreen() {
   const [groceryInput, setGroceryInput] = useState('');
   const [groceryLoading, setGroceryLoading] = useState(false);
   const [addingGrocery, setAddingGrocery] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => { loadMeals(); }, [selectedDate]);
   useEffect(() => { loadGoal(); loadGrocery(); }, [user]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([loadMeals(), loadGoal(), loadGrocery()]);
+    setRefreshing(false);
+  };
 
   const loadMeals = async () => {
     console.log('[loadMeals] fetching date:', selectedDate, 'user:', user?.id);
@@ -171,6 +179,7 @@ export default function MealsScreen() {
     setSavingMeal(false);
     if (error) {
       console.error('[saveMeal] insert failed:', error.message, error.code);
+      haptics.warning();
       setMealError('Could not save meal: ' + error.message);
       return;
     }
@@ -180,6 +189,7 @@ export default function MealsScreen() {
 
     setMName(''); setMType('breakfast'); setMCal(''); setMProt(''); setMCarbs(''); setMFat(''); setMNotes('');
     setLogModal(false);
+    haptics.success();
     setMealSaved(true);
     setTimeout(() => setMealSaved(false), 2500);
 
@@ -192,6 +202,7 @@ export default function MealsScreen() {
     const { error } = await supabase.from('meals').delete().eq('id', id);
     if (error) {
       console.error('[deleteMeal] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not delete meal: ' + error.message);
       return;
     }
@@ -216,10 +227,12 @@ export default function MealsScreen() {
     setSavingGoal(false);
     if (error) {
       console.error('[saveGoal] failed:', error.message);
+      haptics.warning();
       setGoalError('Could not save goals: ' + error.message);
       return;
     }
     setGoalsModal(false);
+    haptics.success();
     setGoalSaved(true);
     setTimeout(() => setGoalSaved(false), 2500);
     loadGoal();
@@ -251,6 +264,7 @@ DAILY TOTALS: [cal]kcal | P:[g]g C:[g]g F:[g]g
 Choose realistic, delicious, easy-to-make meals.`;
       setMealPlan(await callAI(prompt));
     } catch {
+      haptics.warning();
       Alert.alert('Error', 'Could not generate meal plan. Please try again.');
     }
     setPlanLoading(false);
@@ -297,6 +311,7 @@ Only list the categories and items. Nothing else.`;
       }
       if (toInsert.length > 0) { await supabase.from('grocery_items').insert(toInsert); loadGrocery(); }
     } catch {
+      haptics.warning();
       Alert.alert('Error', 'Could not generate grocery list.');
     }
     setGroceryLoading(false);
@@ -307,7 +322,7 @@ Only list the categories and items. Nothing else.`;
     setAddingGrocery(true);
     const { error } = await supabase.from('grocery_items').insert({ name: groceryInput.trim(), category: 'Other' });
     setAddingGrocery(false);
-    if (error) { Alert.alert('Error', 'Could not add item: ' + error.message); return; }
+    if (error) { haptics.warning(); Alert.alert('Error', 'Could not add item: ' + error.message); return; }
     setGroceryInput(''); loadGrocery();
   };
 
@@ -316,6 +331,7 @@ Only list the categories and items. Nothing else.`;
     const { error } = await supabase.from('grocery_items').update({ checked: !item.checked }).eq('id', item.id);
     if (error) {
       console.error('[toggleGrocery] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not update item: ' + error.message);
       return;
     }
@@ -345,7 +361,10 @@ Only list the categories and items. Nothing else.`;
 
   // ── LOG TAB ───────────────────────────────────────────────────────────────
   const renderLog = () => (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={ss.scroll}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={ss.scroll}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}>
       {mealSaved && (
         <View style={ss.savedBanner}>
           <Check size={15} color="#3A8F52" />
@@ -392,7 +411,7 @@ Only list the categories and items. Nothing else.`;
             <View style={[ss.typeBadge, { backgroundColor: MEAL_COLORS[type] }]}>
               <Text style={ss.typeLabel}>{MEAL_LABELS[type]}</Text>
             </View>
-            <TouchableOpacity style={ss.groupAddBtn} onPress={() => { setMType(type); setLogModal(true); }}>
+            <TouchableOpacity style={ss.groupAddBtn} onPress={() => { setMType(type); setLogModal(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Plus size={14} color={MEAL_COLORS[type]} />
             </TouchableOpacity>
           </View>
@@ -470,7 +489,10 @@ Only list the categories and items. Nothing else.`;
 
   // ── GROCERY TAB ───────────────────────────────────────────────────────────
   const renderGrocery = () => (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={ss.scroll}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={ss.scroll}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}>
       <View style={ss.groceryTop}>
         <TouchableOpacity style={[ss.genBtn, { flex: 1, marginBottom: 0 }, groceryLoading && ss.genBtnActive]} onPress={generateGrocery} disabled={groceryLoading}>
           {groceryLoading ? <ActivityIndicator size="small" color={dark.bg} /> : <Sparkles size={15} color={groceryLoading ? dark.bg : gold[400]} />}
@@ -518,6 +540,7 @@ Only list the categories and items. Nothing else.`;
                 const { error } = await supabase.from('grocery_items').delete().eq('id', item.id);
                 if (error) {
                   console.error('[deleteGroceryItem] failed:', error.message);
+                  haptics.warning();
                   Alert.alert('Error', 'Could not remove item: ' + error.message);
                   return;
                 }

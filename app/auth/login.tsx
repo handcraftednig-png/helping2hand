@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import { Mail, Lock, Eye, EyeOff, GraduationCap, CircleAlert } from 'lucide-react-native';
 import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { haptics } from '@/lib/haptics';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -21,28 +22,41 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   const { signInWithEmail, signInWithGoogle } = useAuth();
 
   const handleEmailLogin = async () => {
     setErrorMsg('');
-    if (!email.trim() || !password.trim()) {
-      setErrorMsg('Please enter your email and password');
-      return;
-    }
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+
+    const nextEmailError = !trimmedEmail
+      ? 'Enter your email'
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
+      ? 'Enter a valid email address'
+      : '';
+    const nextPasswordError = !trimmedPassword ? 'Enter your password' : '';
+    setEmailError(nextEmailError);
+    setPasswordError(nextPasswordError);
+    if (nextEmailError || nextPasswordError) { haptics.warning(); return; }
+
+    haptics.tap();
     setLoading(true);
-    const { error } = await signInWithEmail(email.trim(), password.trim());
+    const { error } = await signInWithEmail(trimmedEmail, trimmedPassword);
     setLoading(false);
-    if (error) { setErrorMsg(error.message); return; }
+    if (error) { haptics.warning(); setErrorMsg(error.message); return; }
     router.replace('/(tabs)');
   };
 
   const handleGoogleLogin = async () => {
+    haptics.tap();
     setErrorMsg('');
     setGoogleLoading(true);
     const { error } = await signInWithGoogle();
     setGoogleLoading(false);
-    if (error) { setErrorMsg(error.message); }
+    if (error) { haptics.warning(); setErrorMsg(error.message); }
   };
 
   return (
@@ -64,14 +78,14 @@ export default function LoginScreen() {
             </View>
           )}
 
-          <View style={styles.inputContainer}>
+          <View style={[styles.inputContainer, !!emailError && styles.inputContainerError]}>
             <Mail size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Email address"
               placeholderTextColor={dark.textMuted}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(v) => { setEmail(v); if (emailError) setEmailError(''); }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -79,24 +93,26 @@ export default function LoginScreen() {
               textContentType="emailAddress"
             />
           </View>
+          {!!emailError && <Text style={styles.fieldError}>{emailError}</Text>}
 
-          <View style={styles.inputContainer}>
+          <View style={[styles.inputContainer, !!passwordError && styles.inputContainerError]}>
             <Lock size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password"
               placeholderTextColor={dark.textMuted}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(v) => { setPassword(v); if (passwordError) setPasswordError(''); }}
               secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoComplete="current-password"
               textContentType="password"
             />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               {showPassword ? <EyeOff size={20} color={dark.textSecondary} /> : <Eye size={20} color={dark.textSecondary} />}
             </TouchableOpacity>
           </View>
+          {!!passwordError && <Text style={styles.fieldError}>{passwordError}</Text>}
 
           <TouchableOpacity
             style={[styles.loginButton, loading && styles.loginButtonDisabled]}
@@ -164,6 +180,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg, borderWidth: 1, borderColor: dark.border,
     marginBottom: spacing.md, paddingHorizontal: spacing.md,
   },
+  inputContainerError: { borderColor: colors.error[600], marginBottom: spacing.xs },
+  fieldError: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.error[600], marginBottom: spacing.md, marginTop: -2 },
   inputIcon: { marginRight: spacing.sm },
   input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 16, color: dark.text, paddingVertical: spacing.md },
   eyeButton: { padding: spacing.sm },

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Modal, TextInput, Alert, Dimensions,
+  Modal, TextInput, Alert, Dimensions, RefreshControl,
 } from 'react-native';
 import {
   ChevronLeft, ChevronRight, Plus, AlertTriangle, CheckCircle,
@@ -12,6 +12,7 @@ import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePickerField } from '@/components/DatePickerField';
+import { haptics } from '@/lib/haptics';
 
 const { width } = Dimensions.get('window');
 const CELL_SIZE = (width - spacing.lg * 2 - spacing.sm * 6) / 7;
@@ -117,6 +118,7 @@ export default function CalendarScreen() {
   const [gradeValue, setGradeValue] = useState('');
   const [gradeMaxValue, setGradeMaxValue] = useState('100');
   const [savingGrade, setSavingGrade] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
@@ -124,6 +126,12 @@ export default function CalendarScreen() {
   useEffect(() => { loadAll(); }, [currentYear, currentMonth]);
   useEffect(() => { loadBlocksForWeek(); }, [weekStart]);
   useEffect(() => { loadGoals(); }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([loadAll(), loadBlocksForWeek(), loadGoals()]);
+    setRefreshing(false);
+  };
 
   const loadAll = async () => {
     const start = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
@@ -279,6 +287,7 @@ export default function CalendarScreen() {
       if (insertErr) {
         console.error('[generateSchedule] insert failed:', insertErr.message);
         setGenerating(false);
+        haptics.warning();
         Alert.alert('Error', 'Could not generate schedule: ' + insertErr.message);
         return;
       }
@@ -309,11 +318,13 @@ export default function CalendarScreen() {
     setSavingBlock(false);
     if (error) {
       console.error('[addBlock] failed:', error.message, error.code);
+      haptics.warning();
       Alert.alert('Error', 'Could not save block: ' + error.message);
       return;
     }
 
     setBlockModal(false); setBlockTitle(''); setBlockDate(''); setBlockTime(''); setBlockDuration('60');
+    haptics.success();
     setBlockSaved(true); setTimeout(() => setBlockSaved(false), 2500);
 
     // Optimistic update
@@ -329,6 +340,7 @@ export default function CalendarScreen() {
     const { error } = await supabase.from('schedule_blocks').update({ completed: !b.completed }).eq('id', b.id);
     if (error) {
       console.error('[toggleBlock] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not update block: ' + error.message);
       return;
     }
@@ -341,6 +353,7 @@ export default function CalendarScreen() {
     const { error } = await supabase.from('schedule_blocks').delete().eq('id', id);
     if (error) {
       console.error('[deleteBlock] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not delete block: ' + error.message);
       return;
     }
@@ -365,11 +378,13 @@ export default function CalendarScreen() {
     setSavingGoal(false);
     if (error) {
       console.error('[addGoal] failed:', error.message, error.code);
+      haptics.warning();
       Alert.alert('Error', 'Could not save goal: ' + error.message);
       return;
     }
 
     setGoalModal(false); setGoalTitle(''); setGoalMins('30');
+    haptics.success();
     setGoalSaved(true); setTimeout(() => setGoalSaved(false), 2500);
 
     // Optimistic update — append immediately so it appears without waiting for reload
@@ -385,6 +400,7 @@ export default function CalendarScreen() {
     const { error } = await supabase.from('user_goals').delete().eq('id', id);
     if (error) {
       console.error('[deleteGoal] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not delete goal: ' + error.message);
       return;
     }
@@ -414,6 +430,7 @@ export default function CalendarScreen() {
     setSavingGrade(false);
     if (error) {
       console.error('[saveGrade] failed:', error.message);
+      haptics.warning();
       Alert.alert('Error', 'Could not save grade: ' + error.message);
       return;
     }
@@ -435,7 +452,7 @@ export default function CalendarScreen() {
     const sel = selectedDate ? getEventsForDate(selectedDate) : null;
 
     return (
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}>
         {blockSaved && (
           <View style={styles.savedBanner}>
             <CheckCircle size={15} color="#3A8F52" />
@@ -579,13 +596,16 @@ export default function CalendarScreen() {
                   <Text style={styles.dayItemTitle}>{b.title}</Text>
                   <Text style={styles.dayItemSub}>{b.duration_minutes}min{b.auto_generated ? ' · auto' : ''}</Text>
                 </View>
-                <TouchableOpacity onPress={() => toggleBlock(b)}>
+                <TouchableOpacity onPress={() => toggleBlock(b)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                   {b.completed ? <CheckCircle size={18} color="#3A8F52" /> : <View style={styles.emptyCircle} />}
                 </TouchableOpacity>
               </View>
             ))}
             {sel.exams.length === 0 && sel.assignments.length === 0 && sel.blocks.length === 0 && (
-              <Text style={styles.emptyDay}>No events — tap "Add block" to schedule something.</Text>
+              <View style={styles.emptyDayState}>
+                <Calendar size={28} color={dark.textMuted} />
+                <Text style={styles.emptyDay}>No events — tap "Add block" to schedule something.</Text>
+              </View>
             )}
           </View>
         )}
@@ -598,7 +618,7 @@ export default function CalendarScreen() {
     const weekDays = Array.from({ length: 7 }, (_, i) => addDaysToStr(weekStart, i));
 
     return (
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}>
         {/* Week nav */}
         <View style={styles.monthNav}>
           <TouchableOpacity style={styles.navArrow} onPress={() => setWeekStart(addDaysToStr(weekStart, -7))}>
@@ -658,7 +678,7 @@ export default function CalendarScreen() {
                     {b.start_time && <Text style={styles.weekBlockTime}>{b.start_time}</Text>}
                     <Text style={styles.weekBlockTitle} numberOfLines={1}>{b.title}</Text>
                     <Text style={[styles.weekBlockMeta, { color: BLOCK_COLORS[b.type] || gold[400] }]}>{b.duration_minutes}min</Text>
-                    <TouchableOpacity onPress={() => toggleBlock(b)} style={{ marginLeft: 4 }}>
+                    <TouchableOpacity onPress={() => toggleBlock(b)} style={{ marginLeft: 4 }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                       {b.completed ? <CheckCircle size={16} color="#3A8F52" /> : <View style={styles.emptyCircleSmall} />}
                     </TouchableOpacity>
                   </TouchableOpacity>
@@ -674,7 +694,7 @@ export default function CalendarScreen() {
 
   // ── Goals view ────────────────────────────────────────────────────────────
   const renderGoals = () => (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120, paddingHorizontal: spacing.lg, paddingTop: 16 }}>
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120, paddingHorizontal: spacing.lg, paddingTop: 16 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={gold[400]} />}>
       {goalSaved && (
         <View style={styles.savedBanner}>
           <CheckCircle size={15} color="#3A8F52" />
@@ -969,7 +989,8 @@ const styles = StyleSheet.create({
   dayItemTime: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: dark.textSecondary, width: 44 },
   dayItemTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: dark.text, flex: 1 },
   dayItemSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: dark.textSecondary },
-  emptyDay: { fontFamily: 'Inter_400Regular', fontSize: 13, color: dark.textMuted, padding: 14 },
+  emptyDay: { fontFamily: 'Inter_400Regular', fontSize: 13, color: dark.textMuted, padding: 14, textAlign: 'center' },
+  emptyDayState: { alignItems: 'center', paddingVertical: 18, gap: 8 },
   emptyCircle: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: dark.borderLight },
   emptyCircleSmall: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: dark.borderLight },
   gradeBtn: {

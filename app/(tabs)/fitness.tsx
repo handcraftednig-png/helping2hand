@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -44,6 +45,7 @@ import {
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { haptics } from '@/lib/haptics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -245,12 +247,17 @@ export default function FitnessScreen() {
   const [weeklyStats, setWeeklyStats] = useState<{ label: string; count: number; minutes: number }[]>([]);
   const [streak, setStreak] = useState(0);
   const [totalWorkoutsAllTime, setTotalWorkoutsAllTime] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { user } = useAuth();
 
   useEffect(() => { loadWorkouts(); }, [selectedWeek]);
   useEffect(() => { loadProfile(); }, []);
   useEffect(() => { if (tab === 'progress') loadProgressData(); }, [tab]);
+
+  const onRefreshLog = async () => { setRefreshing(true); await loadWorkouts(); setRefreshing(false); };
+  const onRefreshCoach = async () => { setRefreshing(true); await loadProfile(); setRefreshing(false); };
+  const onRefreshProgress = async () => { setRefreshing(true); await loadProgressData(); setRefreshing(false); };
 
   // ── Data loaders ──────────────────────────────────────────────────────────
   async function loadWorkouts() {
@@ -356,11 +363,13 @@ export default function FitnessScreen() {
     setSavingWorkout(false);
     if (error) {
       console.error('[addWorkout] failed:', error.message, error.code);
+      haptics.warning();
       Alert.alert('Error', 'Failed to save workout: ' + error.message);
       return;
     }
 
     setLogModalVisible(false);
+    haptics.success();
     setSavedAnimation(true);
     setTimeout(() => setSavedAnimation(false), 2000);
 
@@ -381,6 +390,7 @@ export default function FitnessScreen() {
           const { error } = await supabase.from('workouts').delete().eq('id', id);
           if (error) {
             console.error('[deleteWorkout] failed:', error.message);
+            haptics.warning();
             Alert.alert('Error', 'Could not delete workout: ' + error.message);
             return;
           }
@@ -414,8 +424,9 @@ export default function FitnessScreen() {
       ({ error } = await supabase.from('fitness_profile').insert(payload));
     }
     setSavingProfile(false);
-    if (error) { Alert.alert('Error', 'Failed to save profile.'); return; }
+    if (error) { haptics.warning(); Alert.alert('Error', 'Failed to save profile.'); return; }
     setProfile({ ...draftProfile });
+    haptics.success();
     setProfileSaved(true);
     setProfileModalVisible(false);
     await loadProfile();
@@ -451,6 +462,7 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
       setAiResponse(result);
       setLastGenDate(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
     } catch {
+      haptics.warning();
       Alert.alert('Error', 'Could not generate workout. Please try again.');
     } finally {
       setLoadingAI(false);
@@ -598,7 +610,10 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
           </View>
 
           {/* Workouts for Selected Day */}
-          <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.listContainer}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefreshLog} tintColor={gold[400]} />}>
             <View style={styles.dayHeader}>
               <Text style={styles.selectedDateTitle}>
                 {isToday(selectedDate) ? "Today's Workouts" : new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
@@ -659,7 +674,10 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
 
       {/* ── COACH TAB ───────────────────────────────────────────────────── */}
       {tab === 'coach' && (
-        <ScrollView style={styles.coachScroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.coachScroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefreshCoach} tintColor={gold[400]} />}>
           {/* Profile Summary Card */}
           <View style={styles.profileCard}>
             <View style={styles.profileCardHeader}>
@@ -735,7 +753,10 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
 
       {/* ── PROGRESS TAB ────────────────────────────────────────────────── */}
       {tab === 'progress' && (
-        <ScrollView style={styles.progressScroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.progressScroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefreshProgress} tintColor={gold[400]} />}>
           {/* Streak + All-time stats */}
           <View style={styles.progressStatsRow}>
             <View style={[styles.progressStatCard, { borderLeftColor: '#E8B820' }]}>

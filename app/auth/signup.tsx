@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import { Mail, Lock, Eye, EyeOff, GraduationCap, ArrowLeft, CircleAlert } from 'lucide-react-native';
 import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { haptics } from '@/lib/haptics';
 
 export default function SignupScreen() {
   const [email, setEmail] = useState('');
@@ -22,19 +23,39 @@ export default function SignupScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
 
   const { signUpWithEmail } = useAuth();
 
   const handleSignup = async () => {
     setErrorMsg('');
-    if (!email.trim()) { setErrorMsg('Please enter your email'); return; }
-    if (!password.trim()) { setErrorMsg('Please enter a password'); return; }
-    if (password.length < 6) { setErrorMsg('Password must be at least 6 characters'); return; }
-    if (password !== confirmPassword) { setErrorMsg('Passwords do not match'); return; }
+    const trimmedEmail = email.trim();
+
+    const nextEmailError = !trimmedEmail
+      ? 'Enter your email'
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
+      ? 'Enter a valid email address'
+      : '';
+    const nextPasswordError = !password.trim()
+      ? 'Enter a password'
+      : password.length < 6
+      ? 'Password must be at least 6 characters'
+      : '';
+    const nextConfirmError = !nextPasswordError && password !== confirmPassword
+      ? 'Passwords do not match'
+      : '';
+    setEmailError(nextEmailError);
+    setPasswordError(nextPasswordError);
+    setConfirmPasswordError(nextConfirmError);
+    if (nextEmailError || nextPasswordError || nextConfirmError) { haptics.warning(); return; }
+
+    haptics.tap();
     setLoading(true);
-    const { error } = await signUpWithEmail(email.trim(), password);
+    const { error } = await signUpWithEmail(trimmedEmail, password);
     setLoading(false);
-    if (error) { setErrorMsg(error.message); return; }
+    if (error) { haptics.warning(); setErrorMsg(error.message); return; }
     router.replace('/(tabs)');
   };
 
@@ -61,14 +82,14 @@ export default function SignupScreen() {
             </View>
           )}
 
-          <View style={styles.inputContainer}>
+          <View style={[styles.inputContainer, !!emailError && styles.inputContainerError]}>
             <Mail size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Email address"
               placeholderTextColor={dark.textMuted}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(v) => { setEmail(v); if (emailError) setEmailError(''); }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -76,42 +97,45 @@ export default function SignupScreen() {
               textContentType="emailAddress"
             />
           </View>
+          {!!emailError && <Text style={styles.fieldError}>{emailError}</Text>}
 
-          <View style={styles.inputContainer}>
+          <View style={[styles.inputContainer, !!passwordError && styles.inputContainerError]}>
             <Lock size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password (min. 6 characters)"
               placeholderTextColor={dark.textMuted}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(v) => { setPassword(v); if (passwordError) setPasswordError(''); }}
               secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoComplete="new-password"
               textContentType="newPassword"
             />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               {showPassword ? <EyeOff size={20} color={dark.textSecondary} /> : <Eye size={20} color={dark.textSecondary} />}
             </TouchableOpacity>
           </View>
+          {!!passwordError && <Text style={styles.fieldError}>{passwordError}</Text>}
 
-          <View style={styles.inputContainer}>
+          <View style={[styles.inputContainer, !!confirmPasswordError && styles.inputContainerError]}>
             <Lock size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Confirm password"
               placeholderTextColor={dark.textMuted}
               value={confirmPassword}
-              onChangeText={setConfirmPassword}
+              onChangeText={(v) => { setConfirmPassword(v); if (confirmPasswordError) setConfirmPasswordError(''); }}
               secureTextEntry={!showConfirmPassword}
               autoCapitalize="none"
               autoComplete="new-password"
               textContentType="newPassword"
             />
-            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton}>
+            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               {showConfirmPassword ? <EyeOff size={20} color={dark.textSecondary} /> : <Eye size={20} color={dark.textSecondary} />}
             </TouchableOpacity>
           </View>
+          {!!confirmPasswordError && <Text style={styles.fieldError}>{confirmPasswordError}</Text>}
 
           <TouchableOpacity
             style={[styles.signupButton, loading && styles.signupButtonDisabled]}
@@ -158,6 +182,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg, borderWidth: 1, borderColor: dark.border,
     marginBottom: spacing.md, paddingHorizontal: spacing.md,
   },
+  inputContainerError: { borderColor: colors.error[600], marginBottom: spacing.xs },
+  fieldError: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.error[600], marginBottom: spacing.md, marginTop: -2 },
   inputIcon: { marginRight: spacing.sm },
   input: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 16, color: dark.text, paddingVertical: spacing.md },
   eyeButton: { padding: spacing.sm },

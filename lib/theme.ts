@@ -73,7 +73,7 @@ export const dark = {
   borderLight: '#383838',
   text: '#F0EDE6',
   textSecondary: '#8A8A8A',
-  textMuted: '#4A4A4A',
+  textMuted: '#6B6B6B',
   goldSurface: '#1E1A0A',
 };
 

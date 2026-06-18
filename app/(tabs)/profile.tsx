@@ -5,6 +5,7 @@ import { LogOut, Mail, User, Shield, CircleAlert, GraduationCap, RefreshCw, Book
 import { colors, dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { haptics } from '@/lib/haptics';
 
 interface ClassroomConnection {
   connected_at: string;
@@ -56,11 +57,13 @@ export default function ProfileScreen() {
   };
 
   const handleConnectClassroom = async () => {
+    haptics.tap();
     setErrorMsg('');
     setConnecting(true);
     const { error } = await connectGoogleClassroom();
     setConnecting(false);
     if (error) {
+      haptics.warning();
       setErrorMsg(error.message);
       return;
     }
@@ -75,14 +78,17 @@ export default function ProfileScreen() {
     const { data, error } = await supabase.functions.invoke('classroom-sync');
     setSyncing(false);
     if (error) {
+      haptics.warning();
       setErrorMsg(error.message ?? 'Sync failed');
       return;
     }
+    haptics.success();
     setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
     await loadConnections();
   };
 
   const handleDisconnectClassroom = async () => {
+    haptics.tap();
     await supabase.from('classroom_connections').delete().eq('user_id', user?.id ?? '');
     setConnection(null);
     setSyncMessage('');
@@ -95,14 +101,17 @@ export default function ProfileScreen() {
     const { data, error } = await supabase.functions.invoke(`${provider}-sync`);
     setLmsSyncing(null);
     if (error) {
+      haptics.warning();
       setErrorMsg(error.message ?? 'Sync failed');
       return;
     }
+    haptics.success();
     setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
     await loadConnections();
   };
 
   const handleDisconnectLms = async (provider: LmsProvider) => {
+    haptics.tap();
     await supabase.from(`${provider}_connections`).delete().eq('user_id', user?.id ?? '');
     if (provider === 'canvas') setCanvasConnection(null);
     else setMoodleConnection(null);
@@ -119,6 +128,7 @@ export default function ProfileScreen() {
   const handleModalConnect = async () => {
     if (!connectModal) return;
     if (!modalUrl.trim() || !modalToken.trim()) {
+      haptics.warning();
       setModalError('Enter both the site URL and your access token');
       return;
     }
@@ -129,18 +139,22 @@ export default function ProfileScreen() {
     });
     setModalConnecting(false);
     if (error) {
+      haptics.warning();
       setModalError(error.message ?? 'Connection failed');
       return;
     }
+    haptics.success();
     setConnectModal(null);
     setSyncMessage(`Synced ${data?.synced_courses ?? 0} courses, ${data?.synced_assignments ?? 0} assignments`);
     await loadConnections();
   };
 
   const confirmSignOut = async () => {
+    haptics.tap();
     setConfirmVisible(false);
     const { error } = await signOut();
     if (error) {
+      haptics.warning();
       setErrorMsg(error.message);
       return;
     }
