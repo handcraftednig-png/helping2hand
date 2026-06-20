@@ -10,13 +10,17 @@ import {
   TextInput,
   Alert,
   RefreshControl,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import {
   Plus, BookOpen, Clock, Play, Pause, RotateCcw,
   ChevronRight, ChevronLeft, Lightbulb, Timer, X, Trash2,
   AlertCircle, CheckCircle, GraduationCap, MessageSquare,
-  CalendarDays, Zap,
+  CalendarDays, Zap, Send, Pencil,
 } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,6 +35,7 @@ interface Assignment {
   priority: 'low' | 'medium' | 'high';
   status: 'pending' | 'in_progress' | 'completed';
   is_exam?: boolean;
+  color?: string | null;
 }
 
 interface Exam {
@@ -39,7 +44,10 @@ interface Exam {
   subject: string;
   exam_date: string;
   status: 'upcoming' | 'completed' | 'missed';
+  color?: string | null;
 }
+
+type DeckDesign = 'classic' | 'minimal' | 'gradient' | 'outline';
 
 interface FlashcardDeck {
   id: string;
@@ -47,6 +55,8 @@ interface FlashcardDeck {
   subject: string;
   cards_count: number;
   created_at: string;
+  color?: string | null;
+  design?: DeckDesign | null;
 }
 
 interface Flashcard {
@@ -65,6 +75,13 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 const SUBJECT_COLORS = ['#D4A017', '#3A8F52', '#C0392B', '#6366f1', '#0891b2', '#d946ef'];
+
+const ITEM_COLOR_SWATCHES = [
+  gold[400], '#3A8F52', '#6366f1', '#0891b2', '#f59e0b',
+  '#C0392B', '#8A8A8A', '#EC4899', '#8B5CF6', '#14B8A6',
+];
+
+const DECK_DESIGNS: DeckDesign[] = ['classic', 'minimal', 'gradient', 'outline'];
 
 function subjectColor(subject: string): string {
   let hash = 0;
@@ -97,6 +114,14 @@ function formatTimer(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+async function callAI(prompt: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('openai-chat', {
+    body: { messages: [{ role: 'user', content: prompt }] },
+  });
+  if (error) throw new Error(error.message);
+  return data?.message || '';
 }
 
 function greeting(): string {
@@ -153,6 +178,24 @@ export default function StudyScreen() {
   const [newSubject, setNewSubject] = useState('');
   const [newDate, setNewDate] = useState('');
   const [newPriority, setNewPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [newColor, setNewColor] = useState<string | null>(null);
+  const [deckColor, setDeckColor] = useState<string | null>(null);
+  const [deckDesign, setDeckDesign] = useState<DeckDesign>('classic');
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // AI Tutor chat
+  const [tutorModal, setTutorModal] = useState(false);
+  const [tutorMessages, setTutorMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [tutorInput, setTutorInput] = useState('');
+  const [tutorLoading, setTutorLoading] = useState(false);
+
+  // AI flashcard generator
+  const [aiCardsModal, setAiCardsModal] = useState(false);
+  const [aiTopic, setAiTopic] = useState('');
+  const [aiCount, setAiCount] = useState('10');
+  const [aiDeckColor, setAiDeckColor] = useState<string | null>(null);
+  const [aiDeckDesign, setAiDeckDesign] = useState<DeckDesign>('classic');
+  const [generatingCards, setGeneratingCards] = useState(false);
   const [newCardFront, setNewCardFront] = useState('');
   const [newCardBack, setNewCardBack] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -179,7 +222,7 @@ export default function StudyScreen() {
     console.log('[loadAssignments] user:', user?.id, 'from:', today);
     const { data, error } = await supabase
       .from('assignments')
-      .select('id,title,subject,due_date,priority,status,is_exam')
+      .select('id,title,subject,due_date,priority,status,is_exam,color')
       .neq('status', 'completed')
       .gte('due_date', today)
       .order('due_date', { ascending: true })
@@ -190,7 +233,7 @@ export default function StudyScreen() {
     const examRows = (data || []).filter(a => a.is_exam);
     setExams(examRows.map(a => ({
       id: a.id, title: a.title, subject: a.subject,
-      exam_date: a.due_date, status: 'upcoming' as const,
+      exam_date: a.due_date, status: 'upcoming' as const, color: a.color,
     })));
   };
 
@@ -199,7 +242,7 @@ export default function StudyScreen() {
     console.log('[loadExams] user:', user?.id, 'from:', today);
     const { data, error } = await supabase
       .from('assignments')
-      .select('id,title,subject,due_date,status,is_exam')
+      .select('id,title,subject,due_date,status,is_exam,color')
       .eq('is_exam', true)
       .neq('status', 'completed')
       .gte('due_date', today)
@@ -208,7 +251,7 @@ export default function StudyScreen() {
     console.log('[loadExams] result:', data?.length, 'error:', error?.message);
     setExams((data || []).map(a => ({
       id: a.id, title: a.title, subject: a.subject,
-      exam_date: a.due_date, status: 'upcoming' as const,
+      exam_date: a.due_date, status: 'upcoming' as const, color: a.color,
     })));
   };
 
@@ -278,12 +321,23 @@ export default function StudyScreen() {
   };
 
   // CRUD
+  const openEditAssignment = (item: Assignment) => {
+    setEditingId(item.id);
+    setNewTitle(item.title);
+    setNewSubject(item.subject);
+    setNewDate(item.due_date);
+    setNewPriority(item.priority);
+    setNewColor(item.color ?? null);
+    setSaveError('');
+    setAssignmentModal(true);
+  };
+
   const addAssignment = async () => {
     if (!newTitle.trim() || !newSubject.trim() || !newDate.trim()) return;
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      setSaveError('You must be signed in to add assignments.');
+      setSaveError('You must be signed in to save assignments.');
       console.error('[addAssignment] no active session');
       return;
     }
@@ -291,11 +345,35 @@ export default function StudyScreen() {
     setSavingAssignment(true);
     setSaveError('');
 
+    if (editingId) {
+      console.log('[addAssignment] editing id:', editingId);
+      const { data: saved, error } = await supabase.from('assignments').update({
+        title: newTitle.trim(), subject: newSubject.trim(), due_date: newDate.trim(),
+        priority: newPriority, color: newColor,
+      }).eq('id', editingId).select().single();
+
+      setSavingAssignment(false);
+      if (error) {
+        console.error('[addAssignment] edit failed:', error.message, error.code);
+        haptics.warning();
+        setSaveError('Could not save changes: ' + error.message);
+        return;
+      }
+      resetForm(); setAssignmentModal(false);
+      if (saved) {
+        setAssignments(prev => prev.map(a => a.id === editingId ? (saved as Assignment) : a).sort((a, b) => a.due_date.localeCompare(b.due_date)));
+      }
+      loadAssignments();
+      haptics.success();
+      setAssignmentSaved(true); setTimeout(() => setAssignmentSaved(false), 2500);
+      return;
+    }
+
     console.log('[addAssignment] uid:', session.user.id, 'due_date:', newDate, 'title:', newTitle);
 
     const { data: saved, error } = await supabase.from('assignments').insert({
       title: newTitle.trim(), subject: newSubject.trim(), due_date: newDate.trim(),
-      priority: newPriority, status: 'pending',
+      priority: newPriority, status: 'pending', color: newColor,
     }).select().single();
 
     console.log('[addAssignment] result:', saved, 'error:', error?.message, 'code:', error?.code);
@@ -320,12 +398,22 @@ export default function StudyScreen() {
     setAssignmentSaved(true); setTimeout(() => setAssignmentSaved(false), 2500);
   };
 
+  const openEditExam = (item: Exam) => {
+    setEditingId(item.id);
+    setNewTitle(item.title);
+    setNewSubject(item.subject);
+    setNewDate(item.exam_date);
+    setNewColor(item.color ?? null);
+    setSaveError('');
+    setExamModal(true);
+  };
+
   const addExam = async () => {
     if (!newTitle.trim() || !newSubject.trim() || !newDate.trim()) return;
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      setSaveError('You must be signed in to add exams.');
+      setSaveError('You must be signed in to save exams.');
       console.error('[addExam] no active session');
       return;
     }
@@ -333,12 +421,39 @@ export default function StudyScreen() {
     setSavingExam(true);
     setSaveError('');
 
+    if (editingId) {
+      console.log('[addExam] editing id:', editingId);
+      const { data: saved, error } = await supabase.from('assignments').update({
+        title: newTitle.trim(), subject: newSubject.trim(), due_date: newDate.trim(), color: newColor,
+      }).eq('id', editingId).select().single();
+
+      setSavingExam(false);
+      if (error) {
+        console.error('[addExam] edit failed:', error.message, error.code);
+        haptics.warning();
+        setSaveError('Could not save changes: ' + error.message);
+        return;
+      }
+      resetForm(); setExamModal(false);
+      if (saved) {
+        const asExam: Exam = {
+          id: saved.id, title: saved.title, subject: saved.subject,
+          exam_date: saved.due_date, status: 'upcoming', color: saved.color,
+        };
+        setExams(prev => prev.map(e => e.id === editingId ? asExam : e).sort((a, b) => a.exam_date.localeCompare(b.exam_date)));
+      }
+      loadAssignments();
+      haptics.success();
+      setExamSaved(true); setTimeout(() => setExamSaved(false), 2500);
+      return;
+    }
+
     console.log('[addExam] uid:', session.user.id, 'exam_date:', newDate, 'title:', newTitle);
 
     // Save to assignments table with is_exam: true so it appears in "Due This Week"
     const { data: saved, error } = await supabase.from('assignments').insert({
       title: newTitle.trim(), subject: newSubject.trim(),
-      due_date: newDate.trim(), priority: 'high', status: 'pending', is_exam: true,
+      due_date: newDate.trim(), priority: 'high', status: 'pending', is_exam: true, color: newColor,
     }).select().single();
 
     console.log('[addExam] result:', saved, 'error:', error?.message, 'code:', error?.code, 'details:', error?.details);
@@ -356,7 +471,7 @@ export default function StudyScreen() {
     if (saved && newDate.trim() >= today) {
       const asExam: Exam = {
         id: saved.id, title: saved.title, subject: saved.subject,
-        exam_date: saved.due_date, status: 'upcoming',
+        exam_date: saved.due_date, status: 'upcoming', color: saved.color,
       };
       setExams(prev => [...prev, asExam].sort((a, b) => a.exam_date.localeCompare(b.exam_date)));
       setAssignments(prev => [...prev, saved as Assignment].sort((a, b) => a.due_date.localeCompare(b.due_date)));
@@ -391,6 +506,7 @@ export default function StudyScreen() {
 
     const { data: saved, error } = await supabase.from('flashcard_decks').insert({
       name: newTitle.trim(), subject: newSubject.trim(), cards_count: 0,
+      color: deckColor, design: deckDesign,
     }).select().single();
 
     console.log('[createDeck] result:', saved, 'error:', error?.message);
@@ -407,6 +523,50 @@ export default function StudyScreen() {
     if (saved) setDecks(prev => [saved as FlashcardDeck, ...prev]);
 
     resetForm(); setDeckModal(false); loadDecks();
+  };
+
+  const generateFlashcards = async () => {
+    if (!aiTopic.trim()) return;
+    setGeneratingCards(true);
+
+    const count = Math.min(Math.max(parseInt(aiCount, 10) || 10, 1), 25);
+    const prompt = `Generate exactly ${count} flashcards (question/answer pairs) to help a student study this topic: "${aiTopic.trim()}".
+Return ONLY a valid JSON array, with no markdown formatting, no code fences, and no commentary — just the array, in this exact shape:
+[{"front": "question text", "back": "answer text"}, ...]`;
+
+    try {
+      const raw = await callAI(prompt);
+      const jsonMatch = raw.match(/\[[\s\S]*\]/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('AI did not return any cards');
+
+      const cardsToInsert = parsed
+        .filter((c: any) => c && typeof c.front === 'string' && typeof c.back === 'string')
+        .map((c: any) => ({ front: c.front.trim(), back: c.back.trim() }));
+      if (cardsToInsert.length === 0) throw new Error('AI response had no valid cards');
+
+      const { data: deck, error: deckErr } = await supabase.from('flashcard_decks').insert({
+        name: aiTopic.trim(), subject: aiTopic.trim(), cards_count: cardsToInsert.length,
+        color: aiDeckColor, design: aiDeckDesign,
+      }).select().single();
+      if (deckErr || !deck) throw new Error(deckErr?.message || 'Could not create deck');
+
+      const { error: cardsErr } = await supabase.from('flashcards').insert(
+        cardsToInsert.map(c => ({ ...c, deck_id: deck.id }))
+      );
+      if (cardsErr) throw new Error(cardsErr.message);
+
+      setDecks(prev => [deck as FlashcardDeck, ...prev]);
+      setAiCardsModal(false); setAiTopic(''); setAiCount('10'); setAiDeckColor(null); setAiDeckDesign('classic');
+      haptics.success();
+      Alert.alert('Flashcards Generated', `Created ${cardsToInsert.length} cards on "${aiTopic.trim()}".`);
+    } catch (e) {
+      console.error('[generateFlashcards] failed:', e);
+      haptics.warning();
+      Alert.alert('Error', 'Could not generate flashcards: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setGeneratingCards(false);
+    }
   };
 
   const deleteDeck = async (id: string) => {
@@ -484,7 +644,40 @@ export default function StudyScreen() {
     setCardModal(true);
   };
 
-  const resetForm = () => { setNewTitle(''); setNewSubject(''); setNewDate(''); setNewPriority('medium'); };
+  const resetForm = () => {
+    setNewTitle(''); setNewSubject(''); setNewDate(''); setNewPriority('medium'); setNewColor(null);
+    setDeckColor(null); setDeckDesign('classic'); setEditingId(null);
+  };
+
+  const openTutor = () => {
+    if (tutorMessages.length === 0) {
+      setTutorMessages([{ role: 'assistant', content: "Hi! I'm your AI tutor. Ask me anything about your coursework — concepts, problem sets, essay help, you name it." }]);
+    }
+    setTutorModal(true);
+  };
+
+  const sendTutorMessage = async () => {
+    const text = tutorInput.trim();
+    if (!text || tutorLoading) return;
+    const history = [...tutorMessages, { role: 'user' as const, content: text }];
+    setTutorMessages(history);
+    setTutorInput('');
+    setTutorLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('openai-chat', {
+        body: { messages: history },
+      });
+      if (error) throw new Error(error.message);
+      const reply = data?.message || "Sorry, I couldn't come up with a response. Try asking again.";
+      setTutorMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (e) {
+      console.error('[sendTutorMessage] failed:', e);
+      haptics.warning();
+      setTutorMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong reaching the tutor. Please try again.' }]);
+    } finally {
+      setTutorLoading(false);
+    }
+  };
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -547,9 +740,12 @@ export default function StudyScreen() {
           renderItem={({ item }) => {
             const days = daysUntil(item.due_date);
             const uc = urgencyColor(days);
-            const sc = subjectColor(item.subject);
+            const sc = item.color || subjectColor(item.subject);
             return (
-              <View style={[styles.assignCard, { borderLeftColor: sc }]}>
+              <TouchableOpacity
+                style={[styles.assignCard, { borderLeftColor: sc }]}
+                onPress={() => openEditAssignment(item)}
+                activeOpacity={0.85}>
                 <View style={styles.assignCardTop}>
                   <View style={[styles.priorityBadge, { backgroundColor: PRIORITY_COLORS[item.priority] + '22' }]}>
                     <Text style={[styles.priorityText, { color: PRIORITY_COLORS[item.priority] }]}>{item.priority}</Text>
@@ -566,13 +762,16 @@ export default function StudyScreen() {
                 </View>
                 <Text style={styles.assignTitle} numberOfLines={2}>{item.title}</Text>
                 <Text style={styles.assignSubject}>{item.subject}</Text>
-                <View style={[styles.dueBadge, { backgroundColor: uc + '20' }]}>
-                  <CalendarDays size={11} color={uc} />
-                  <Text style={[styles.dueText, { color: uc }]}>
-                    {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}
-                  </Text>
+                <View style={styles.assignCardBottomRow}>
+                  <View style={[styles.dueBadge, { backgroundColor: uc + '20' }]}>
+                    <CalendarDays size={11} color={uc} />
+                    <Text style={[styles.dueText, { color: uc }]}>
+                      {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}
+                    </Text>
+                  </View>
+                  <Pencil size={12} color={dark.textMuted} />
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           }}
         />
@@ -596,9 +795,9 @@ export default function StudyScreen() {
         exams.map(exam => {
           const days = daysUntil(exam.exam_date);
           const uc = urgencyColor(days);
-          const sc = subjectColor(exam.subject);
+          const sc = exam.color || subjectColor(exam.subject);
           return (
-            <View key={exam.id} style={styles.examCard}>
+            <TouchableOpacity key={exam.id} style={styles.examCard} onPress={() => openEditExam(exam)} activeOpacity={0.85}>
               <View style={[styles.examSubjectBar, { backgroundColor: sc }]} />
               <View style={styles.examContent}>
                 <Text style={styles.examTitle}>{exam.title}</Text>
@@ -612,13 +811,14 @@ export default function StudyScreen() {
                   {days === 0 ? 'today' : days === 1 ? 'day' : 'days'}
                 </Text>
               </View>
-            </View>
+              <Pencil size={13} color={dark.textMuted} style={{ marginLeft: 8 }} />
+            </TouchableOpacity>
           );
         })
       )}
 
-      {/* AI Tutor shortcut */}
-      <View style={styles.aiTutorCard}>
+      {/* AI Tutor */}
+      <TouchableOpacity style={styles.aiTutorCard} onPress={openTutor} activeOpacity={0.85}>
         <View style={styles.aiTutorLeft}>
           <View style={styles.aiTutorIcon}>
             <MessageSquare size={20} color={gold[400]} />
@@ -630,9 +830,9 @@ export default function StudyScreen() {
         </View>
         <View style={styles.aiTutorBadge}>
           <Zap size={12} color={gold[400]} />
-          <Text style={styles.aiTutorBadgeText}>Chat tab</Text>
+          <Text style={styles.aiTutorBadgeText}>Ask now</Text>
         </View>
-      </View>
+      </TouchableOpacity>
 
     </ScrollView>
   );
@@ -642,10 +842,16 @@ export default function StudyScreen() {
     <View style={{ flex: 1 }}>
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>Your Decks</Text>
-        <TouchableOpacity style={styles.addBtn} onPress={() => { resetForm(); setDeckModal(true); }}>
-          <Plus size={16} color={gold[400]} />
-          <Text style={styles.addBtnText}>New Deck</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={styles.addBtn} onPress={() => setAiCardsModal(true)}>
+            <Zap size={16} color={gold[400]} />
+            <Text style={styles.addBtnText}>Generate with AI</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addBtn} onPress={() => { resetForm(); setDeckModal(true); }}>
+            <Plus size={16} color={gold[400]} />
+            <Text style={styles.addBtnText}>New Deck</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       <FlatList
         data={decks}
@@ -660,16 +866,18 @@ export default function StudyScreen() {
             <Text style={styles.emptySubtitle}>Create a deck to start studying with flashcards.</Text>
           </View>
         }
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          const dc = item.color || subjectColor(item.subject);
+          return (
           <TouchableOpacity
-            style={styles.deckCard}
+            style={[styles.deckCard, { borderLeftColor: dc, borderLeftWidth: 3 }]}
             onPress={() => openStudyMode(item)}
             onLongPress={() => Alert.alert('Delete Deck', `Delete "${item.name}"?`, [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Delete', style: 'destructive', onPress: () => deleteDeck(item.id) },
             ])}>
-            <View style={[styles.deckIcon, { backgroundColor: subjectColor(item.subject) + '20' }]}>
-              <BookOpen size={22} color={subjectColor(item.subject)} />
+            <View style={[styles.deckIcon, { backgroundColor: dc + '20' }]}>
+              <BookOpen size={22} color={dc} />
             </View>
             <View style={styles.deckContent}>
               <Text style={styles.deckName}>{item.name}</Text>
@@ -683,7 +891,8 @@ export default function StudyScreen() {
               <Plus size={16} color={dark.textSecondary} />
             </TouchableOpacity>
           </TouchableOpacity>
-        )}
+          );
+        }}
       />
     </View>
   );
@@ -726,11 +935,19 @@ export default function StudyScreen() {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Assignment</Text>
-              <TouchableOpacity onPress={() => setAssignmentModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
+              <Text style={styles.modalTitle}>{editingId ? 'Edit Assignment' : 'Add Assignment'}</Text>
+              <TouchableOpacity onPress={() => { setAssignmentModal(false); resetForm(); }}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
             </View>
-            <TextInput style={styles.input} placeholder="Title" placeholderTextColor={dark.textMuted} value={newTitle} onChangeText={setNewTitle} />
-            <TextInput style={styles.input} placeholder="Subject" placeholderTextColor={dark.textMuted} value={newSubject} onChangeText={setNewSubject} />
+            <TextInput
+              style={styles.input} placeholder="Title" placeholderTextColor={dark.textMuted}
+              value={newTitle} onChangeText={setNewTitle}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            <TextInput
+              style={styles.input} placeholder="Subject" placeholderTextColor={dark.textMuted}
+              value={newSubject} onChangeText={setNewSubject}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
             <DatePickerField value={newDate} onChange={setNewDate} placeholder="Select due date" />
             <View style={styles.priorityRow}>
               {(['low', 'medium', 'high'] as const).map(p => (
@@ -739,9 +956,18 @@ export default function StudyScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            <View style={styles.colorSwatchRow}>
+              {ITEM_COLOR_SWATCHES.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorSwatch, { backgroundColor: c }, newColor === c && styles.colorSwatchSelected]}
+                  onPress={() => setNewColor(c)}
+                />
+              ))}
+            </View>
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
             <TouchableOpacity style={[styles.submitBtn, savingAssignment && { opacity: 0.7 }]} onPress={addAssignment} disabled={savingAssignment}>
-              <Text style={styles.submitText}>{savingAssignment ? 'Saving...' : 'Add Assignment'}</Text>
+              <Text style={styles.submitText}>{savingAssignment ? 'Saving...' : editingId ? 'Save Changes' : 'Add Assignment'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -753,15 +979,32 @@ export default function StudyScreen() {
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Exam</Text>
-              <TouchableOpacity onPress={() => setExamModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
+              <Text style={styles.modalTitle}>{editingId ? 'Edit Exam' : 'Add Exam'}</Text>
+              <TouchableOpacity onPress={() => { setExamModal(false); resetForm(); }}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
             </View>
-            <TextInput style={styles.input} placeholder="Exam title" placeholderTextColor={dark.textMuted} value={newTitle} onChangeText={setNewTitle} />
-            <TextInput style={styles.input} placeholder="Subject" placeholderTextColor={dark.textMuted} value={newSubject} onChangeText={setNewSubject} />
+            <TextInput
+              style={styles.input} placeholder="Exam title" placeholderTextColor={dark.textMuted}
+              value={newTitle} onChangeText={setNewTitle}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            <TextInput
+              style={styles.input} placeholder="Subject" placeholderTextColor={dark.textMuted}
+              value={newSubject} onChangeText={setNewSubject}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
             <DatePickerField value={newDate} onChange={setNewDate} placeholder="Select exam date" />
+            <View style={styles.colorSwatchRow}>
+              {ITEM_COLOR_SWATCHES.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorSwatch, { backgroundColor: c }, newColor === c && styles.colorSwatchSelected]}
+                  onPress={() => setNewColor(c)}
+                />
+              ))}
+            </View>
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
             <TouchableOpacity style={[styles.submitBtn, { backgroundColor: '#C0392B' }, savingExam && { opacity: 0.7 }]} onPress={addExam} disabled={savingExam}>
-              <Text style={styles.submitText}>{savingExam ? 'Saving...' : 'Add Exam'}</Text>
+              <Text style={styles.submitText}>{savingExam ? 'Saving...' : editingId ? 'Save Changes' : 'Add Exam'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -776,10 +1019,88 @@ export default function StudyScreen() {
               <Text style={styles.modalTitle}>Create Deck</Text>
               <TouchableOpacity onPress={() => setDeckModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
             </View>
-            <TextInput style={styles.input} placeholder="Deck name" placeholderTextColor={dark.textMuted} value={newTitle} onChangeText={setNewTitle} />
-            <TextInput style={styles.input} placeholder="Subject" placeholderTextColor={dark.textMuted} value={newSubject} onChangeText={setNewSubject} />
+            <TextInput
+              style={styles.input} placeholder="Deck name" placeholderTextColor={dark.textMuted}
+              value={newTitle} onChangeText={setNewTitle}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            <TextInput
+              style={styles.input} placeholder="Subject" placeholderTextColor={dark.textMuted}
+              value={newSubject} onChangeText={setNewSubject}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            <Text style={styles.fieldLabel}>Card design</Text>
+            <View style={styles.priorityRow}>
+              {DECK_DESIGNS.map(d => (
+                <TouchableOpacity key={d} style={[styles.priorityChip, deckDesign === d && { backgroundColor: deckColor || gold[400], borderColor: deckColor || gold[400] }]} onPress={() => setDeckDesign(d)}>
+                  <Text style={[styles.priorityChipText, deckDesign === d && { color: '#fff' }]}>{d}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.fieldLabel}>Color</Text>
+            <View style={styles.colorSwatchRow}>
+              {ITEM_COLOR_SWATCHES.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorSwatch, { backgroundColor: c }, deckColor === c && styles.colorSwatchSelected]}
+                  onPress={() => setDeckColor(c)}
+                />
+              ))}
+            </View>
             <TouchableOpacity style={[styles.submitBtn, savingDeck && { opacity: 0.7 }]} onPress={createDeck} disabled={savingDeck}>
               <Text style={styles.submitText}>{savingDeck ? 'Saving...' : 'Create Deck'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Generate Flashcards with AI Modal */}
+      <Modal animationType="slide" transparent visible={aiCardsModal} onRequestClose={() => setAiCardsModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Generate with AI</Text>
+              <TouchableOpacity onPress={() => setAiCardsModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]}
+              placeholder="Topic or questions to cover (e.g. 'World War II causes' or 'Spanish verb conjugation basics')"
+              placeholderTextColor={dark.textMuted}
+              value={aiTopic}
+              onChangeText={setAiTopic}
+              multiline
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Number of cards (default 10)"
+              placeholderTextColor={dark.textMuted}
+              value={aiCount}
+              onChangeText={setAiCount}
+              keyboardType="numeric"
+              returnKeyType="done"
+              onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            <Text style={styles.fieldLabel}>Card design</Text>
+            <View style={styles.priorityRow}>
+              {DECK_DESIGNS.map(d => (
+                <TouchableOpacity key={d} style={[styles.priorityChip, aiDeckDesign === d && { backgroundColor: aiDeckColor || gold[400], borderColor: aiDeckColor || gold[400] }]} onPress={() => setAiDeckDesign(d)}>
+                  <Text style={[styles.priorityChipText, aiDeckDesign === d && { color: '#fff' }]}>{d}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.fieldLabel}>Color</Text>
+            <View style={styles.colorSwatchRow}>
+              {ITEM_COLOR_SWATCHES.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorSwatch, { backgroundColor: c }, aiDeckColor === c && styles.colorSwatchSelected]}
+                  onPress={() => setAiDeckColor(c)}
+                />
+              ))}
+            </View>
+            <TouchableOpacity style={[styles.submitBtn, (generatingCards || !aiTopic.trim()) && { opacity: 0.7 }]} onPress={generateFlashcards} disabled={generatingCards || !aiTopic.trim()}>
+              <Text style={styles.submitText}>{generatingCards ? 'Generating...' : 'Generate Flashcards'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -794,7 +1115,11 @@ export default function StudyScreen() {
               <Text style={styles.modalTitle}>{selectedDeck?.name}</Text>
               <TouchableOpacity onPress={() => setCardModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
             </View>
-            <TextInput style={styles.input} placeholder="Front (question)" placeholderTextColor={dark.textMuted} value={newCardFront} onChangeText={setNewCardFront} />
+            <TextInput
+              style={styles.input} placeholder="Front (question)" placeholderTextColor={dark.textMuted}
+              value={newCardFront} onChangeText={setNewCardFront}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
             <TextInput style={[styles.input, { minHeight: 72, textAlignVertical: 'top' }]} placeholder="Back (answer)" placeholderTextColor={dark.textMuted} value={newCardBack} onChangeText={setNewCardBack} multiline />
             <TouchableOpacity style={[styles.submitBtn, savingCard && { opacity: 0.7 }]} onPress={addCard} disabled={savingCard}>
               <Text style={styles.submitText}>{savingCard ? 'Saving...' : 'Add Card'}</Text>
@@ -833,16 +1158,37 @@ export default function StudyScreen() {
             {cards.length > 0 ? (
               <>
                 <Text style={styles.cardProgress}>{currentCardIndex + 1} / {cards.length}</Text>
-                <TouchableOpacity
-                  style={styles.flashcard}
-                  onPress={() => setIsFlipped(!isFlipped)}
-                  activeOpacity={0.92}>
-                  <Text style={styles.flashcardSide}>{isFlipped ? 'ANSWER' : 'QUESTION'}</Text>
-                  <Text style={styles.flashcardText}>
-                    {isFlipped ? cards[currentCardIndex].back : cards[currentCardIndex].front}
-                  </Text>
-                  <Text style={styles.flashcardHint}>{isFlipped ? 'Tap to flip back' : 'Tap to reveal answer'}</Text>
-                </TouchableOpacity>
+                {(() => {
+                  const accent = selectedDeck?.color || subjectColor(selectedDeck?.subject || '');
+                  const design = selectedDeck?.design || 'classic';
+                  const cardContent = (
+                    <>
+                      <Text style={[styles.flashcardSide, { color: accent }]}>{isFlipped ? 'ANSWER' : 'QUESTION'}</Text>
+                      <Text style={styles.flashcardText}>
+                        {isFlipped ? cards[currentCardIndex].back : cards[currentCardIndex].front}
+                      </Text>
+                      <Text style={styles.flashcardHint}>{isFlipped ? 'Tap to flip back' : 'Tap to reveal answer'}</Text>
+                    </>
+                  );
+                  return (
+                    <TouchableOpacity style={styles.flashcardWrap} onPress={() => setIsFlipped(!isFlipped)} activeOpacity={0.92}>
+                      {design === 'gradient' ? (
+                        <LinearGradient colors={[accent, dark.elevated]} style={styles.flashcardInner}>
+                          {cardContent}
+                        </LinearGradient>
+                      ) : (
+                        <View style={[
+                          styles.flashcardInner,
+                          design === 'outline' && { backgroundColor: dark.bg, borderWidth: 2, borderColor: accent },
+                          design === 'minimal' && { backgroundColor: dark.surface },
+                          design === 'classic' && { backgroundColor: dark.elevated, borderWidth: 1, borderColor: `${accent}40` },
+                        ]}>
+                          {cardContent}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })()}
                 <View style={styles.navRow}>
                   <TouchableOpacity
                     style={[styles.navBtn, currentCardIndex === 0 && { opacity: 0.3 }]}
@@ -884,7 +1230,11 @@ export default function StudyScreen() {
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.textSecondary, marginBottom: 16 }}>
               You studied for {formatTimer(studyTimer)}. Log it?
             </Text>
-            <TextInput style={styles.input} placeholder="Subject (e.g. Math, History)" placeholderTextColor={dark.textMuted} value={sessionSubject} onChangeText={setSessionSubject} />
+            <TextInput
+              style={styles.input} placeholder="Subject (e.g. Math, History)" placeholderTextColor={dark.textMuted}
+              value={sessionSubject} onChangeText={setSessionSubject}
+              returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()}
+            />
             <TextInput style={[styles.input, { minHeight: 72, textAlignVertical: 'top' }]} placeholder="Notes (optional)" placeholderTextColor={dark.textMuted} value={sessionNotes} onChangeText={setSessionNotes} multiline />
             {sessionError ? <Text style={styles.errorText}>{sessionError}</Text> : null}
             <TouchableOpacity style={[styles.submitBtn, (!sessionSubject.trim() || savingSession) && { opacity: 0.7 }]} onPress={saveStudySession} disabled={!sessionSubject.trim() || savingSession}>
@@ -895,6 +1245,67 @@ export default function StudyScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* AI Tutor Chat Modal */}
+      <Modal animationType="slide" transparent visible={tutorModal} onRequestClose={() => setTutorModal(false)}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalSheet, { flex: 1, paddingBottom: 16 }]}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <MessageSquare size={18} color={gold[400]} />
+                  <Text style={styles.modalTitle}>AI Tutor</Text>
+                </View>
+                <TouchableOpacity onPress={() => setTutorModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
+              </View>
+
+              <FlatList
+                data={tutorMessages}
+                keyExtractor={(_, i) => String(i)}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: 12 }}
+                renderItem={({ item }) => (
+                  <View style={[styles.tutorBubbleRow, item.role === 'user' && styles.tutorBubbleRowUser]}>
+                    <View style={[styles.tutorBubble, item.role === 'user' ? styles.tutorBubbleUser : styles.tutorBubbleAssistant]}>
+                      <Text style={[styles.tutorBubbleText, item.role === 'user' && styles.tutorBubbleTextUser]}>{item.content}</Text>
+                    </View>
+                  </View>
+                )}
+                ListFooterComponent={tutorLoading ? (
+                  <View style={[styles.tutorBubbleRow]}>
+                    <View style={[styles.tutorBubble, styles.tutorBubbleAssistant]}>
+                      <Text style={styles.tutorBubbleText}>Thinking...</Text>
+                    </View>
+                  </View>
+                ) : null}
+              />
+
+              <View style={styles.tutorInputRow}>
+                <TextInput
+                  style={styles.tutorInput}
+                  placeholder="Ask your tutor anything..."
+                  placeholderTextColor={dark.textMuted}
+                  value={tutorInput}
+                  onChangeText={setTutorInput}
+                  multiline
+                  returnKeyType="send"
+                  blurOnSubmit
+                  onSubmitEditing={sendTutorMessage}
+                />
+                <TouchableOpacity
+                  style={[styles.tutorSendBtn, (!tutorInput.trim() || tutorLoading) && { opacity: 0.5 }]}
+                  onPress={sendTutorMessage}
+                  disabled={!tutorInput.trim() || tutorLoading}>
+                  <Send size={18} color={dark.bg} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -984,6 +1395,7 @@ const styles = StyleSheet.create({
   assignSubject: { fontFamily: 'Inter_400Regular', fontSize: 12, color: dark.textSecondary, marginBottom: 8 },
   dueBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: borderRadius.full, alignSelf: 'flex-start' },
   dueText: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
+  assignCardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 
   examCard: {
     flexDirection: 'row', alignItems: 'center',
@@ -1072,6 +1484,10 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: dark.border,
   },
   priorityChipText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: dark.textSecondary, textTransform: 'capitalize' },
+  colorSwatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  colorSwatch: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: 'transparent' },
+  colorSwatchSelected: { borderColor: dark.text },
+  fieldLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: dark.textSecondary, marginBottom: 8 },
   submitBtn: { backgroundColor: gold[400], paddingVertical: 14, borderRadius: borderRadius.lg, alignItems: 'center' },
   submitText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: dark.bg },
   divider: { height: 1, backgroundColor: dark.border, marginVertical: 16 },
@@ -1089,10 +1505,10 @@ const styles = StyleSheet.create({
 
   // Study mode
   cardProgress: { fontFamily: 'Inter_500Medium', fontSize: 13, color: dark.textSecondary, textAlign: 'center', marginBottom: 20 },
-  flashcard: {
-    flex: 1, backgroundColor: dark.elevated, borderRadius: 20,
+  flashcardWrap: { flex: 1, marginBottom: 20 },
+  flashcardInner: {
+    flex: 1, borderRadius: 20,
     justifyContent: 'center', alignItems: 'center', padding: 32,
-    marginBottom: 20, borderWidth: 1, borderColor: `${gold[400]}40`,
   },
   flashcardSide: { fontFamily: 'Inter_700Bold', fontSize: 11, color: gold[400], letterSpacing: 1.5, marginBottom: 24 },
   flashcardText: { fontFamily: 'Inter_600SemiBold', fontSize: 22, color: dark.text, textAlign: 'center', lineHeight: 32 },
@@ -1100,4 +1516,27 @@ const styles = StyleSheet.create({
   navRow: { flexDirection: 'row', justifyContent: 'space-between' },
   navBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 12 },
   navText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: gold[400] },
+
+  // AI Tutor chat
+  tutorBubbleRow: { flexDirection: 'row', marginBottom: 10 },
+  tutorBubbleRowUser: { justifyContent: 'flex-end' },
+  tutorBubble: { maxWidth: '82%', borderRadius: borderRadius.lg, paddingHorizontal: 14, paddingVertical: 10 },
+  tutorBubbleAssistant: { backgroundColor: dark.elevated, borderWidth: 1, borderColor: dark.border },
+  tutorBubbleUser: { backgroundColor: gold[400] },
+  tutorBubbleText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.text, lineHeight: 20 },
+  tutorBubbleTextUser: { color: dark.bg, fontFamily: 'Inter_500Medium' },
+  tutorInputRow: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 10,
+    paddingTop: 10, borderTopWidth: 1, borderTopColor: dark.border,
+  },
+  tutorInput: {
+    flex: 1, backgroundColor: dark.elevated, borderRadius: borderRadius.lg,
+    paddingHorizontal: 14, paddingVertical: 10, maxHeight: 100,
+    fontFamily: 'Inter_400Regular', fontSize: 14, color: dark.text,
+    borderWidth: 1, borderColor: dark.border,
+  },
+  tutorSendBtn: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: gold[400],
+    justifyContent: 'center', alignItems: 'center',
+  },
 });

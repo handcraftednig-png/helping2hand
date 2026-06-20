@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Dimensions,
   RefreshControl,
+  Keyboard,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -41,6 +42,7 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  CalendarPlus,
 } from 'lucide-react-native';
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +59,7 @@ interface Workout {
   notes: string | null;
   date: string;
   created_at: string;
+  color?: string | null;
 }
 
 interface FitnessProfile {
@@ -84,6 +87,15 @@ const workoutColors: Record<string, string> = {
   'Soccer': '#5A8A1A',
   'Other': '#6B6B6B',
 };
+
+const WORKOUT_COLOR_SWATCHES = [
+  gold[400], '#3A8F52', '#6366f1', '#0891b2', '#f59e0b',
+  '#C0392B', '#8A8A8A', '#EC4899', '#8B5CF6', '#14B8A6',
+];
+
+function workoutColorOf(w: { type: string; color?: string | null }): string {
+  return w.color || workoutColors[w.type] || workoutColors['Other'];
+}
 
 const FITNESS_GOALS = [
   { key: 'weight_loss', label: 'Weight Loss', icon: '🔥' },
@@ -224,6 +236,7 @@ export default function FitnessScreen() {
   const [savedAnimation, setSavedAnimation] = useState(false);
   const [savingWorkout, setSavingWorkout] = useState(false);
   const [workoutType, setWorkoutType] = useState(workoutTypes[0]);
+  const [workoutColor, setWorkoutColor] = useState(workoutColors[workoutTypes[0]]);
   const [duration, setDuration] = useState('');
   const [caloriesBurned, setCaloriesBurned] = useState('');
   const [logNotes, setLogNotes] = useState('');
@@ -242,6 +255,8 @@ export default function FitnessScreen() {
   const [loadingAI, setLoadingAI] = useState(false);
   const [lastGenDate, setLastGenDate] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [addingPlanToToday, setAddingPlanToToday] = useState(false);
+  const [planAddedToday, setPlanAddedToday] = useState(false);
 
   // Progress tab state
   const [weeklyStats, setWeeklyStats] = useState<{ label: string; count: number; minutes: number }[]>([]);
@@ -356,6 +371,7 @@ export default function FitnessScreen() {
       calories_burned: caloriesBurned.trim() ? parseInt(caloriesBurned) : null,
       date: selectedDate,
       notes: logNotes.trim() || null,
+      color: workoutColor,
     }).select().single();
 
     console.log('[addWorkout] result:', saved, 'error:', error?.message);
@@ -403,6 +419,7 @@ export default function FitnessScreen() {
 
   function resetLogForm() {
     setWorkoutType(workoutTypes[0]);
+    setWorkoutColor(workoutColors[workoutTypes[0]]);
     setDuration('');
     setCaloriesBurned('');
     setLogNotes('');
@@ -435,6 +452,7 @@ export default function FitnessScreen() {
   async function generateWorkout() {
     setLoadingAI(true);
     setAiResponse('');
+    setPlanAddedToday(false);
     const goalLabel = FITNESS_GOALS.find(g => g.key === profile.goal)?.label || profile.goal;
     const levelLabel = FITNESS_LEVELS.find(l => l.key === profile.fitness_level)?.label || profile.fitness_level;
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -466,6 +484,54 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
       Alert.alert('Error', 'Could not generate workout. Please try again.');
     } finally {
       setLoadingAI(false);
+    }
+  }
+
+  async function addPlanToToday() {
+    if (!aiResponse.trim() || addingPlanToToday) return;
+    setAddingPlanToToday(true);
+
+    const extractPrompt = `Convert the workout plan below into a single JSON object describing one workout session to log. Return ONLY a valid JSON object, no markdown, no commentary.
+
+Format exactly: {"type": "Running" | "Walking" | "Cycling" | "Swimming" | "Weight Training" | "HIIT" | "Yoga" | "Basketball" | "Soccer" | "Other", "duration_minutes": <integer total session minutes including warm-up and cool-down>, "calories_burned": <integer estimate>, "notes": "<short one-sentence summary of the session>"}
+
+Workout plan:
+${aiResponse}`;
+
+    try {
+      const raw = await callAI(extractPrompt);
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('No JSON found in AI response');
+      const parsed = JSON.parse(match[0]);
+
+      const type = workoutTypes.includes(parsed.type) ? parsed.type : 'Other';
+      const durationMinutes = Math.max(1, parseInt(parsed.duration_minutes, 10) || 30);
+      const caloriesBurnedVal = parsed.calories_burned ? Math.max(0, parseInt(parsed.calories_burned, 10)) : null;
+      const notes = typeof parsed.notes === 'string' && parsed.notes.trim() ? parsed.notes.trim() : 'AI Coach generated workout';
+      const today = new Date().toISOString().split('T')[0];
+
+      const { data: saved, error } = await supabase.from('workouts').insert({
+        type,
+        duration_minutes: durationMinutes,
+        calories_burned: caloriesBurnedVal,
+        date: today,
+        notes,
+        color: workoutColors[type],
+      }).select().single();
+
+      if (error) throw new Error(error.message);
+
+      haptics.success();
+      setPlanAddedToday(true);
+      if (saved) setWorkouts(prev => [...prev, saved as Workout].sort((a, b) => a.date.localeCompare(b.date)));
+      loadWorkouts();
+      if (tab === 'progress') loadProgressData();
+      Alert.alert('Added!', `"${type}" workout added to today's log.`);
+    } catch (e) {
+      haptics.warning();
+      Alert.alert('Error', 'Could not add this plan to your workouts. Please try again.');
+    } finally {
+      setAddingPlanToToday(false);
     }
   }
 
@@ -600,7 +666,7 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
                   {dayWorkouts.length > 0 && (
                     <View style={styles.workoutDots}>
                       {dayWorkouts.slice(0, 3).map((w, i) => (
-                        <View key={i} style={[styles.workoutDot, { backgroundColor: selected ? dark.bg : workoutColors[w.type] || gold[400] }]} />
+                        <View key={i} style={[styles.workoutDot, { backgroundColor: selected ? dark.bg : workoutColorOf(w) }]} />
                       ))}
                     </View>
                   )}
@@ -640,11 +706,11 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
             ) : (
               selectedWorkouts.map(workout => (
                 <View key={workout.id} style={styles.workoutCard}>
-                  <View style={[styles.workoutColorBar, { backgroundColor: workoutColors[workout.type] || workoutColors['Other'] }]} />
+                  <View style={[styles.workoutColorBar, { backgroundColor: workoutColorOf(workout) }]} />
                   <View style={styles.workoutContent}>
                     <View style={styles.workoutTopRow}>
-                      <View style={[styles.workoutTypePill, { backgroundColor: `${workoutColors[workout.type] || workoutColors['Other']}20` }]}>
-                        <Text style={[styles.workoutTypePillText, { color: workoutColors[workout.type] || workoutColors['Other'] }]}>{workout.type}</Text>
+                      <View style={[styles.workoutTypePill, { backgroundColor: `${workoutColorOf(workout)}20` }]}>
+                        <Text style={[styles.workoutTypePillText, { color: workoutColorOf(workout) }]}>{workout.type}</Text>
                       </View>
                       <TouchableOpacity onPress={() => deleteWorkout(workout.id)} style={styles.deleteButton}>
                         <Trash2 size={16} color={dark.textMuted} />
@@ -733,6 +799,35 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
 
           {/* AI Response */}
           {aiResponse ? <CoachResponseCard response={aiResponse} /> : null}
+
+          {aiResponse ? (
+            <TouchableOpacity
+              style={[
+                styles.addPlanButton,
+                planAddedToday && styles.addPlanButtonDone,
+                addingPlanToToday && styles.generateButtonDisabled,
+              ]}
+              onPress={addPlanToToday}
+              disabled={addingPlanToToday || planAddedToday}
+              activeOpacity={0.85}>
+              {addingPlanToToday ? (
+                <>
+                  <ActivityIndicator size="small" color={gold[400]} />
+                  <Text style={styles.addPlanButtonText}>Adding to today...</Text>
+                </>
+              ) : planAddedToday ? (
+                <>
+                  <CheckCircle size={18} color="#3A8F52" />
+                  <Text style={[styles.addPlanButtonText, { color: '#3A8F52' }]}>Added to Today's Workouts</Text>
+                </>
+              ) : (
+                <>
+                  <CalendarPlus size={18} color={gold[400]} />
+                  <Text style={styles.addPlanButtonText}>Add to Today's Workouts</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : null}
 
           {/* Empty state */}
           {!aiResponse && !loadingAI && (
@@ -886,11 +981,22 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
                   <TouchableOpacity
                     key={type}
                     style={[styles.workoutTypeChip, isSelected && { backgroundColor: color, borderColor: color }]}
-                    onPress={() => setWorkoutType(type)}>
+                    onPress={() => { setWorkoutType(type); setWorkoutColor(workoutColors[type]); }}>
                     <Text style={[styles.workoutTypeChipText, isSelected && styles.workoutTypeChipTextSelected, !isSelected && { color }]}>{type}</Text>
                   </TouchableOpacity>
                 );
               })}
+            </View>
+
+            <Text style={styles.fieldLabel}>Color</Text>
+            <View style={styles.colorSwatchRow}>
+              {WORKOUT_COLOR_SWATCHES.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.colorSwatch, { backgroundColor: c }, workoutColor === c && styles.colorSwatchSelected]}
+                  onPress={() => setWorkoutColor(c)}
+                />
+              ))}
             </View>
 
             <View style={styles.inputRow}>
@@ -905,6 +1011,7 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
                     onChangeText={setDuration}
                     keyboardType="number-pad"
                     returnKeyType="done"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                   />
                   <Text style={styles.unitLabel}>min</Text>
                 </View>
@@ -920,6 +1027,7 @@ Be concise but specific. Include estimated duration and calories burned. Tailor 
                     onChangeText={setCaloriesBurned}
                     keyboardType="number-pad"
                     returnKeyType="done"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                   />
                   <Text style={styles.unitLabel}>kcal</Text>
                 </View>
@@ -1209,6 +1317,15 @@ const styles = StyleSheet.create({
   lastGenRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: spacing.md, justifyContent: 'center' },
   lastGenText: { fontFamily: 'Inter_400Regular', fontSize: 12, color: dark.textMuted },
 
+  addPlanButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    backgroundColor: dark.goldSurface, paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg, marginBottom: spacing.md,
+    borderWidth: 1, borderColor: `${gold[400]}40`,
+  },
+  addPlanButtonDone: { backgroundColor: '#0D1F12', borderColor: '#3A8F5260' },
+  addPlanButtonText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: gold[400] },
+
   coachCard: {
     backgroundColor: dark.surface, borderRadius: borderRadius.xl,
     borderWidth: 1, borderColor: `${gold[400]}25`, overflow: 'hidden', marginBottom: spacing.md,
@@ -1313,6 +1430,10 @@ const styles = StyleSheet.create({
   },
   workoutTypeChipText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
   workoutTypeChipTextSelected: { color: dark.bg, fontFamily: 'Inter_600SemiBold' },
+
+  colorSwatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  colorSwatch: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: 'transparent' },
+  colorSwatchSelected: { borderColor: dark.text },
 
   inputRow: { flexDirection: 'row', gap: spacing.md },
   inputGroup: { flex: 1 },

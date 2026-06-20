@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, ActivityIndicator, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { LogOut, Mail, User, Shield, CircleAlert, GraduationCap, RefreshCw, BookOpen, Library } from 'lucide-react-native';
@@ -40,6 +40,8 @@ export default function ProfileScreen() {
   const [modalToken, setModalToken] = useState('');
   const [modalConnecting, setModalConnecting] = useState(false);
   const [modalError, setModalError] = useState('');
+  const modalUrlInputRef = useRef<TextInput>(null);
+  const modalTokenInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     loadConnections();
@@ -353,6 +355,7 @@ export default function ProfileScreen() {
             )}
 
             <TextInput
+              ref={modalUrlInputRef}
               style={styles.modalInput}
               placeholder={connectModal === 'canvas' ? 'yourschool.instructure.com' : 'yourschool.moodlecloud.com'}
               placeholderTextColor={dark.textMuted}
@@ -360,8 +363,12 @@ export default function ProfileScreen() {
               onChangeText={setModalUrl}
               autoCapitalize="none"
               autoCorrect={false}
+              returnKeyType="next"
+              onSubmitEditing={() => modalTokenInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
             <TextInput
+              ref={modalTokenInputRef}
               style={styles.modalInput}
               placeholder="Access token"
               placeholderTextColor={dark.textMuted}
@@ -370,6 +377,8 @@ export default function ProfileScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               secureTextEntry
+              returnKeyType="go"
+              onSubmitEditing={handleModalConnect}
             />
 
             <View style={styles.modalActions}>

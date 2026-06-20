@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,8 @@ export default function SignupScreen() {
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
 
   const { signUpWithEmail } = useAuth();
+  const passwordInputRef = useRef<TextInput>(null);
+  const confirmPasswordInputRef = useRef<TextInput>(null);
 
   const handleSignup = async () => {
     setErrorMsg('');
@@ -95,6 +97,9 @@ export default function SignupScreen() {
               autoCorrect={false}
               autoComplete="email"
               textContentType="emailAddress"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
           </View>
           {!!emailError && <Text style={styles.fieldError}>{emailError}</Text>}
@@ -102,6 +107,7 @@ export default function SignupScreen() {
           <View style={[styles.inputContainer, !!passwordError && styles.inputContainerError]}>
             <Lock size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
+              ref={passwordInputRef}
               style={styles.input}
               placeholder="Password (min. 6 characters)"
               placeholderTextColor={dark.textMuted}
@@ -111,6 +117,9 @@ export default function SignupScreen() {
               autoCapitalize="none"
               autoComplete="new-password"
               textContentType="newPassword"
+              returnKeyType="next"
+              onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
             <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               {showPassword ? <EyeOff size={20} color={dark.textSecondary} /> : <Eye size={20} color={dark.textSecondary} />}
@@ -121,6 +130,7 @@ export default function SignupScreen() {
           <View style={[styles.inputContainer, !!confirmPasswordError && styles.inputContainerError]}>
             <Lock size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
+              ref={confirmPasswordInputRef}
               style={styles.input}
               placeholder="Confirm password"
               placeholderTextColor={dark.textMuted}
@@ -130,6 +140,8 @@ export default function SignupScreen() {
               autoCapitalize="none"
               autoComplete="new-password"
               textContentType="newPassword"
+              returnKeyType="go"
+              onSubmitEditing={handleSignup}
             />
             <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               {showConfirmPassword ? <EyeOff size={20} color={dark.textSecondary} /> : <Eye size={20} color={dark.textSecondary} />}

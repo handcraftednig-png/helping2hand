@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, TextInput, Alert, ActivityIndicator, RefreshControl,
+  Modal, TextInput, Alert, ActivityIndicator, RefreshControl, Keyboard,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Plus, UtensilsCrossed, Flame, Beef, Wheat, Trash2, Calendar,
   ChevronLeft, ChevronRight, X, Sparkles, ShoppingCart,
-  Check, Settings, Droplets,
+  Check, Settings, Droplets, Camera,
 } from 'lucide-react-native';
 import { dark, gold, spacing, borderRadius } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -22,6 +23,7 @@ interface Meal {
   calories: number | null; protein: number | null;
   carbs: number | null; fat: number | null;
   date: string; notes: string | null;
+  color?: string | null;
 }
 interface NutritionGoal {
   id: string; daily_calories: number; daily_protein: number;
@@ -39,6 +41,13 @@ const MEAL_LABELS: Record<MealType, string> = {
   breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack',
 };
 const MEAL_ORDER: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+const MEAL_COLOR_SWATCHES = [
+  gold[400], '#3A8F52', '#6366f1', '#0891b2', '#f59e0b',
+  '#C0392B', '#8A8A8A', '#EC4899', '#8B5CF6', '#14B8A6',
+];
+function mealColor(m: { meal_type: MealType; color?: string | null }): string {
+  return m.color || MEAL_COLORS[m.meal_type];
+}
 const GOAL_LABELS: Record<DietGoal, string> = {
   lose: 'Lose Weight', maintain: 'Maintain', gain: 'Build Muscle',
 };
@@ -87,6 +96,20 @@ async function callAI(prompt: string): Promise<string> {
   return data?.message || '';
 }
 
+interface MealPhotoResult {
+  name?: string; meal_type?: MealType;
+  calories?: number; protein?: number; carbs?: number; fat?: number;
+}
+
+async function analyzeMealPhoto(base64: string, mimeType: string): Promise<MealPhotoResult> {
+  const { data, error } = await supabase.functions.invoke('analyze-meal-photo', {
+    body: { image: base64, mimeType },
+  });
+  if (error) throw new Error(error.message);
+  if (data?.error) throw new Error(data.error);
+  return data as MealPhotoResult;
+}
+
 export default function MealsScreen() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('log');
@@ -104,6 +127,8 @@ export default function MealsScreen() {
   const [mCarbs, setMCarbs] = useState('');
   const [mFat, setMFat] = useState('');
   const [mNotes, setMNotes] = useState('');
+  const [mColor, setMColor] = useState(MEAL_COLORS.breakfast);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
 
   const [editCal, setEditCal] = useState('');
   const [editProt, setEditProt] = useState('');
@@ -172,6 +197,7 @@ export default function MealsScreen() {
       carbs: mCarbs ? parseInt(mCarbs) : null,
       fat: mFat ? parseInt(mFat) : null,
       notes: mNotes.trim() || null,
+      color: mColor,
     }).select().single();
 
     console.log('[saveMeal] insert result:', saved, 'error:', error);
@@ -187,7 +213,7 @@ export default function MealsScreen() {
     // Optimistic update — add to local state immediately so it appears at once
     if (saved) setMeals(prev => [...prev, saved as Meal]);
 
-    setMName(''); setMType('breakfast'); setMCal(''); setMProt(''); setMCarbs(''); setMFat(''); setMNotes('');
+    setMName(''); setMType('breakfast'); setMCal(''); setMProt(''); setMCarbs(''); setMFat(''); setMNotes(''); setMColor(MEAL_COLORS.breakfast);
     setLogModal(false);
     haptics.success();
     setMealSaved(true);
@@ -195,6 +221,61 @@ export default function MealsScreen() {
 
     // Reload from DB to confirm
     loadMeals();
+  };
+
+  const handleMealPhotoAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset.base64) return;
+    setAnalyzingPhoto(true);
+    setMealError('');
+    try {
+      const mimeType = asset.mimeType || 'image/jpeg';
+      const result = await analyzeMealPhoto(asset.base64, mimeType);
+      if (result.name) setMName(result.name);
+      if (result.meal_type && MEAL_ORDER.includes(result.meal_type)) {
+        setMType(result.meal_type);
+        setMColor(MEAL_COLORS[result.meal_type]);
+      }
+      if (typeof result.calories === 'number') setMCal(String(Math.round(result.calories)));
+      if (typeof result.protein === 'number') setMProt(String(Math.round(result.protein)));
+      if (typeof result.carbs === 'number') setMCarbs(String(Math.round(result.carbs)));
+      if (typeof result.fat === 'number') setMFat(String(Math.round(result.fat)));
+      haptics.success();
+    } catch (e) {
+      haptics.warning();
+      setMealError('Could not analyze photo: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setAnalyzingPhoto(false);
+    }
+  };
+
+  const pickMealPhoto = () => {
+    Alert.alert('Scan Meal Photo', 'Add a photo to estimate nutrition', [
+      {
+        text: 'Take Photo',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert('Camera permission needed', 'Enable camera access in Settings to take a photo.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6 });
+          if (!result.canceled && result.assets?.[0]) handleMealPhotoAsset(result.assets[0]);
+        },
+      },
+      {
+        text: 'Choose from Library',
+        onPress: async () => {
+          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert('Photo library permission needed', 'Enable photo access in Settings to choose a photo.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.6, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+          if (!result.canceled && result.assets?.[0]) handleMealPhotoAsset(result.assets[0]);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const deleteMeal = async (id: string) => {
@@ -411,14 +492,14 @@ Only list the categories and items. Nothing else.`;
             <View style={[ss.typeBadge, { backgroundColor: MEAL_COLORS[type] }]}>
               <Text style={ss.typeLabel}>{MEAL_LABELS[type]}</Text>
             </View>
-            <TouchableOpacity style={ss.groupAddBtn} onPress={() => { setMType(type); setLogModal(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <TouchableOpacity style={ss.groupAddBtn} onPress={() => { setMType(type); setMColor(MEAL_COLORS[type]); setLogModal(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Plus size={14} color={MEAL_COLORS[type]} />
             </TouchableOpacity>
           </View>
           {groups[type].length === 0 ? (
             <Text style={ss.emptyType}>Nothing logged yet</Text>
           ) : groups[type].map(meal => (
-            <View key={meal.id} style={ss.mealCard}>
+            <View key={meal.id} style={[ss.mealCard, { borderLeftWidth: 3, borderLeftColor: mealColor(meal) }]}>
               <View style={{ flex: 1 }}>
                 <Text style={ss.mealName}>{meal.name}</Text>
                 <View style={ss.chipRow}>
@@ -591,7 +672,7 @@ Only list the categories and items. Nothing else.`;
       {tab === 'grocery' && renderGrocery()}
 
       {tab === 'log' && (
-        <TouchableOpacity style={ss.fab} onPress={() => { setMName(''); setMType('breakfast'); setMCal(''); setMProt(''); setMCarbs(''); setMFat(''); setMNotes(''); setLogModal(true); }}>
+        <TouchableOpacity style={ss.fab} onPress={() => { setMName(''); setMType('breakfast'); setMCal(''); setMProt(''); setMCarbs(''); setMFat(''); setMNotes(''); setMColor(MEAL_COLORS.breakfast); setLogModal(true); }}>
           <Plus size={24} color={dark.bg} />
         </TouchableOpacity>
       )}
@@ -605,13 +686,33 @@ Only list the categories and items. Nothing else.`;
               <Text style={ss.mTitle}>Log Meal</Text>
               <TouchableOpacity onPress={() => setLogModal(false)}><X size={22} color={dark.textSecondary} /></TouchableOpacity>
             </View>
-            <TextInput style={ss.inp} placeholder="Meal name" placeholderTextColor={dark.textMuted} value={mName} onChangeText={setMName} />
+            <TouchableOpacity style={[ss.genBtn, analyzingPhoto && { opacity: 0.7 }]} onPress={pickMealPhoto} disabled={analyzingPhoto}>
+              {analyzingPhoto
+                ? <ActivityIndicator size="small" color={G} />
+                : <Camera size={18} color={G} />}
+              <Text style={ss.genBtnText}>{analyzingPhoto ? 'Analyzing photo...' : 'Scan Meal Photo'}</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={ss.inp} placeholder="Meal name" placeholderTextColor={dark.textMuted}
+              value={mName} onChangeText={setMName}
+              returnKeyType="done" onSubmitEditing={Keyboard.dismiss}
+            />
             <Text style={ss.fLabel}>Meal Type</Text>
             <View style={ss.typeRow}>
               {MEAL_ORDER.map(t => (
-                <TouchableOpacity key={t} style={[ss.tChip, mType === t && { backgroundColor: MEAL_COLORS[t], borderColor: MEAL_COLORS[t] }]} onPress={() => setMType(t)}>
+                <TouchableOpacity key={t} style={[ss.tChip, mType === t && { backgroundColor: MEAL_COLORS[t], borderColor: MEAL_COLORS[t] }]} onPress={() => { setMType(t); setMColor(MEAL_COLORS[t]); }}>
                   <Text style={[ss.tChipTxt, mType === t && { color: '#fff' }]}>{MEAL_LABELS[t]}</Text>
                 </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={ss.fLabel}>Color</Text>
+            <View style={[ss.typeRow, { marginBottom: 14 }]}>
+              {MEAL_COLOR_SWATCHES.map(c => (
+                <TouchableOpacity
+                  key={c}
+                  style={[ss.colorSwatch, { backgroundColor: c }, mColor === c && ss.colorSwatchSelected]}
+                  onPress={() => setMColor(c)}
+                />
               ))}
             </View>
             <Text style={ss.fLabel}>Nutrition (optional)</Text>
@@ -619,7 +720,11 @@ Only list the categories and items. Nothing else.`;
               {([['Calories', mCal, setMCal], ['Protein g', mProt, setMProt], ['Carbs g', mCarbs, setMCarbs], ['Fat g', mFat, setMFat]] as [string, string, (v: string) => void][]).map(([label, val, setter]) => (
                 <View key={label} style={ss.macroCell}>
                   <Text style={ss.macroCellLabel}>{label}</Text>
-                  <TextInput style={ss.macroCellInput} placeholder="0" placeholderTextColor={dark.textMuted} value={val} onChangeText={setter} keyboardType="numeric" />
+                  <TextInput
+                    style={ss.macroCellInput} placeholder="0" placeholderTextColor={dark.textMuted}
+                    value={val} onChangeText={setter} keyboardType="numeric"
+                    returnKeyType="done" onSubmitEditing={Keyboard.dismiss}
+                  />
                 </View>
               ))}
             </View>
@@ -657,7 +762,11 @@ Only list the categories and items. Nothing else.`;
                 {([['Daily Calories', editCal, setEditCal], ['Protein (g)', editProt, setEditProt], ['Carbs (g)', editCarbs, setEditCarbs], ['Fat (g)', editFat, setEditFat]] as [string, string, (v: string) => void][]).map(([label, val, setter]) => (
                   <View key={label} style={ss.macroCell}>
                     <Text style={ss.macroCellLabel}>{label}</Text>
-                    <TextInput style={ss.macroCellInput} placeholder="0" placeholderTextColor={dark.textMuted} value={val} onChangeText={setter} keyboardType="numeric" />
+                    <TextInput
+                      style={ss.macroCellInput} placeholder="0" placeholderTextColor={dark.textMuted}
+                      value={val} onChangeText={setter} keyboardType="numeric"
+                      returnKeyType="done" onSubmitEditing={Keyboard.dismiss}
+                    />
                   </View>
                 ))}
               </View>
@@ -768,6 +877,8 @@ const ss = StyleSheet.create({
   tChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99, backgroundColor: dark.elevated, borderWidth: 1, borderColor: dark.border },
   tChipActive: { backgroundColor: G, borderColor: G },
   tChipTxt: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: dark.textSecondary },
+  colorSwatch: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: 'transparent' },
+  colorSwatchSelected: { borderColor: dark.text },
   macroGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
   macroCell: { width: '47%' },
   macroCellLabel: { fontFamily: 'Inter_500Medium', fontSize: 11, color: dark.textSecondary, marginBottom: 4 },

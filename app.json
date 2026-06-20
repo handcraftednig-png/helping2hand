@@ -10,7 +10,12 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.helpinghand.ai"
+      "bundleIdentifier": "com.helpinghand.ai",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Used to take a photo of your meal so the app can estimate its nutrition.",
+        "NSPhotoLibraryUsageDescription": "Used to pick a photo of your meal so the app can estimate its nutrition."
+      }
     },
     "android": {
       "package": "com.helpinghand.ai"
@@ -24,7 +29,8 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-image-picker"
     ],
     "experiments": {
       "typedRoutes": true

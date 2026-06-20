@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ export default function LoginScreen() {
   const [passwordError, setPasswordError] = useState('');
 
   const { signInWithEmail, signInWithGoogle } = useAuth();
+  const passwordInputRef = useRef<TextInput>(null);
 
   const handleEmailLogin = async () => {
     setErrorMsg('');
@@ -91,6 +92,9 @@ export default function LoginScreen() {
               autoCorrect={false}
               autoComplete="email"
               textContentType="emailAddress"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
           </View>
           {!!emailError && <Text style={styles.fieldError}>{emailError}</Text>}
@@ -98,6 +102,7 @@ export default function LoginScreen() {
           <View style={[styles.inputContainer, !!passwordError && styles.inputContainerError]}>
             <Lock size={20} color={dark.textSecondary} style={styles.inputIcon} />
             <TextInput
+              ref={passwordInputRef}
               style={styles.input}
               placeholder="Password"
               placeholderTextColor={dark.textMuted}
@@ -107,6 +112,8 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoComplete="current-password"
               textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={handleEmailLogin}
             />
             <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               {showPassword ? <EyeOff size={20} color={dark.textSecondary} /> : <Eye size={20} color={dark.textSecondary} />}

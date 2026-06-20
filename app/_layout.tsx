@@ -9,6 +9,7 @@ import {
   Inter_600SemiBold,
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { dark } from '@/lib/theme';
@@ -73,9 +74,11 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <AppNavigator />
-      <StatusBar style="light" />
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <AppNavigator />
+        <StatusBar style="light" />
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
